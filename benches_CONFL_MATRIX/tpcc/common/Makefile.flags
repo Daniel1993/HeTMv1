@@ -1,0 +1,6 @@
+PROG     := tpcc 
+CFLAGS   += -w -DSTM -I $(STM)/include -I include
+CPPFLAGS += -w -DSTM -I $(STM)/include -I include
+LDFLAGS  += -L $(STM)/lib
+LIBS     += -lstm -lm -lrt -lpthread -fpermissive
+

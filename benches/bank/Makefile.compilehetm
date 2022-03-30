@@ -1,0 +1,23 @@
+$(CODE_HETM_OBJS) \
+$(HETM_ROOT)/libhetm.a \
+$(HETM_ROOT)/hetm-inst-cpu.o \
+$(HETM_ROOT)/hetm-inst-gpu.o: $(DEPS_PR_STM_OBJS) $(CODE_HTM_SRCS)
+	@echo " ============================================ "
+	@echo " === Building HeTM lib "
+	@echo " ============================================ "
+	$(MAKE) --directory $(HETM_ROOT) clean
+	$(MAKE) -j14 --directory $(HETM_ROOT) \
+		USE_TSX_IMPL=$(USE_TSX_IMPL) \
+		CMP_TYPE=$(CMP_TYPE) \
+		LOG_TYPE=$(LOG_TYPE) \
+		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+		CFG=$(CFG) \
+		PROFILE=$(PROFILE) \
+		INST_CPU=$(INST_CPU) \
+		USE_UNIF_MEM=$(USE_UNIF_MEM) \
+		PRINT_DEB=$(PRINT_DEB) \
+		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
+		HETM_NB_DEVICES=$(HETM_NB_DEVICES) \
+		REDUCED_RS=$(REDUCED_RS) \
+		DISABLE_RS=$(DISABLE_RS) \
+		DISABLE_WS=$(DISABLE_WS)

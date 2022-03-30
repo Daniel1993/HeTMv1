@@ -1,0 +1,7 @@
+DEPS_CUDA_UTIL_SRCS  := \
+		$(DEPS_CUDA_UTIL_SRC_DIR)/bitmap.cpp \
+	    $(DEPS_CUDA_UTIL_SRC_DIR)/memman.cu \
+	    $(DEPS_CUDA_UTIL_SRC_DIR)/knlman.cpp
+# $(DEPS_CUDA_UTIL_SRC_DIR)/aux.cu
+DEPS_CUDA_UTIL_OBJS := \
+    $(addsuffix .o, $(basename $(DEPS_CUDA_UTIL_SRCS)))

@@ -1,0 +1,7 @@
+./bin
+./target
+./build
+./tests/*.o
+./tests/Runner
+*.o
+bank

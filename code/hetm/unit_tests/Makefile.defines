@@ -1,0 +1,132 @@
+CMP_APPLY       ?= 0
+DEBUG           ?= 0
+GPUEn           ?= 1
+CPUEn           ?= 1
+CPU_INV         ?= 0
+GPU_PART        ?= 0.6
+CPU_PART        ?= 0.6
+USE_STREAM      ?= 1
+P_INTERSECT     ?= 0.0
+# BANK_PART == 1 does partitioned accesses
+BANK_PART       ?= 1
+CMP_TYPE        ?= COMPRESSED
+LOG_TYPE        ?= BMAP
+PROFILE         ?= 0
+OLD_BMAP_IMPL   ?= 0
+BANK_INTRA_CONFL ?= 0
+USE_UNIF_MEM     ?= 0
+LOG_SIZE            ?= 32768
+STM_LOG_BUFFER_SIZE ?= 4
+DISABLE_RS      ?= 0
+DISABLE_WS      ?= 0
+DISABLE_EARLY_VALIDATION ?= 0
+REDUCED_RS ?= 0
+BANK_PART_SCALE ?= 1
+BMAP_GRAN_BITS ?= 12
+HETM_NB_DEVICES ?= 2
+USE_TSX_IMPL    ?= 0
+PRINT_DEB       ?= 0
+
+### BENCH can be BANK or MEMCD
+
+BENCH           ?= BANK
+
+DISABLE_PRSTM   ?= 0
+INST_CPU        ?= 1
+
+### IMPORTANT: for MEMCD this must be configured e.g., PR_MAX_RWSET_SIZE=16)!!!
+PR_MAX_RWSET_SIZE ?= 128
+DEFAULT_blockNum  ?=
+DEFAULT_threadNum ?=
+
+SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
+SYS_CPU_NB_CORES=$(shell cat /proc/cpuinfo | grep processor | wc -l)
+
+DEFINES += -DLOG_TYPE=$(LOG_TYPE) \
+	-DHETM_GPU_EN=$(GPUEn) \
+	-DHETM_CPU_EN=$(CPUEn) \
+	-DCPU_INV=$(CPU_INV) \
+	-DGPU_PART=$(GPU_PART) \
+	-DCPU_PART=$(CPU_PART) \
+	-DP_INTERSECT=$(P_INTERSECT) \
+	-DBANK_PART=$(BANK_PART) \
+	-DSYS_CPU_MAX_FREQ=$(SYS_CPU_MAX_FREQ) \
+	-DPR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+	-DHETM_BANK_PART_SCALE=$(BANK_PART_SCALE) \
+	-DSYS_CPU_NB_CORES=$(SYS_CPU_NB_CORES) \
+	-DHETM_NB_DEVICES=$(HETM_NB_DEVICES) \
+	-DBANK_INTRA_CONFL=$(BANK_INTRA_CONFL) \
+	-DHETM_REDUCED_RS=$(REDUCED_RS) \
+	-DBMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
+#
+
+ifeq ($(DISABLE_RS),1)
+DEFINES += -DHETM_DISABLE_RS=1
+endif
+
+ifeq ($(DISABLE_WS),1)
+DEFINES += -DHETM_DISABLE_WS=1
+endif
+
+ifeq ($(OLD_BMAP_IMPL),1)
+DEFINES += -DHETM_OLD_BMAP_IMPL
+endif
+
+ifeq ($(DISABLE_PRSTM),1)
+DEFINES += -DBANK_DISABLE_PRSTM
+endif
+
+ifeq ($(BENCH),BANK)
+DEFINES += -DBENCH_BANK
+endif
+
+ifeq ($(BENCH),MEMCD)
+DEFINES += -DBENCH_MEMCD
+endif
+
+ifeq ($(CMP_APPLY),1)
+DEFINES += -DCMP_APPLY=1
+endif
+
+ifeq ($(INST_CPU),1)
+  DEFINES += -DHETM_INSTRUMENT_CPU
+endif
+
+############
+### CMP_TYPE
+ifeq ($(CMP_TYPE),COMPRESSED)
+DEFINES += -DHETM_CMP_TYPE=1
+endif
+ifeq ($(CMP_TYPE),DISABLED)
+DEFINES += -DHETM_CMP_TYPE=0
+endif
+############
+
+############
+### LOG_TYPE
+ifeq ($(LOG_TYPE),VERS)
+DEFINES += -DHETM_LOG_TYPE=1
+endif
+ifeq ($(LOG_TYPE),ADDR)
+DEFINES += -DHETM_LOG_TYPE=2
+endif
+ifeq ($(LOG_TYPE),BMAP)
+DEFINES += -DHETM_LOG_TYPE=3
+endif
+ifeq ($(LOG_TYPE),VERS2)
+DEFINES += -DHETM_LOG_TYPE=4
+endif
+############
+
+ifeq ($(PROFILE),1)
+DEFINES += -DUSE_NVTX
+LIBS += -lnvToolsExt
+endif
+
+ifeq ($(USE_STREAM),1)
+DEFINES += -DUSE_STREAM=1
+endif
+
+ifeq ($(DEBUG),1)
+DEFINES += -DDEBUG
+endif

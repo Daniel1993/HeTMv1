@@ -1,0 +1,61 @@
+bayes:
+
+  (test)  -v32 -r1024 -n2  -p20 -i2 -e2     -t
+  (+)     -v32 -r4096 -n2  -p20 -i2 -e2     -t
+  (++)    -v32 -r4096 -n10 -p40 -i2 -e8 -s1 -t
+
+
+genome:
+
+  (test)  -g256   -s16 -n16384    -t 
+  (+)     -g512   -s32 -n32768    -t
+  (++)    -g16384 -s64 -n16777216 -t
+
+
+intruder:
+
+  (test)  -a10 -l4   -n2048   -s1 -t
+  (+)     -a10 -l16  -n4096   -s1 -t
+  (++)    -a10 -l128 -n262144 -s1 -t
+
+
+kmeans:
+
+  high (test) -m15 -n15 -t0.05    -i random-n2048-d16-c16  -p
+  high (+)    -m15 -n15 -t0.05    -i random-n16384-d24-c16 -p
+  high (++)   -m15 -n15 -t0.00001 -i random-n65536-d32-c16 -p
+  low  (test) -m40 -n40 -t0.05    -i random-n2048-d16-c16  -p
+  low  (+)    -m40 -n40 -t0.05    -i random-n16384-d24-c16 -p
+  low  (++)   -m40 -n40 -t0.00001 -i random-n65536-d32-c16 -p
+
+
+labyrinth:
+
+  (test)  -i random-x32-y32-z3-n96    -t
+  (+)     -i random-x48-y48-z3-n64    -t
+  (++)    -i random-x512-y512-z7-n512 -t
+
+
+ssca2:
+
+  (test)  -s13 -i1.0 -u1.0 -l3 -p3 -t
+  (+)     -s14 -i1.0 -u1.0 -l9 -p9 -t
+  (++)    -s20 -i1.0 -u1.0 -l3 -p3 -t
+
+
+vacation:
+
+  high (test) -n4 -q60 -u90 -r16384   -t4096    -c
+  high (+)    -n4 -q60 -u90 -r1048576 -t4096    -c
+  high (++)   -n4 -q60 -u90 -r1048576 -t4194304 -c
+  low  (test) -n2 -q90 -u98 -r16384   -t4096    -c
+  low  (+)    -n2 -q90 -u98 -r1048576 -t4096    -c
+  low  (++)   -n2 -q90 -u98 -r1048576 -t4194304 -c
+
+
+yada
+
+  (test)  -a20 -i 633.2           -t
+  (+)     -a10 -i ttimeu10000.2   -t
+  (++)    -a15 -i ttimeu1000000.2 -t
+

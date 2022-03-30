@@ -1,0 +1,3 @@
+# define first TSX_MOD_DIR
+TSX_MOD_SRCS := \
+    $(TSX_MOD_DIR)/src/tsx_impl.c 

@@ -1,0 +1,42 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "g++.exe - Build and debug active file",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${fileDirname}\\${fileBasenameNoExtension}.exe",
+			"args": [],
+			"stopAtEntry": false,
+			"cwd": "${fileDirname}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"miDebuggerPath": "D:\\msys64\\mingw64\\bin\\gdb.exe",
+			"setupCommands": [
+				{
+					"description": "Enable pretty-printing for gdb",
+					"text": "-enable-pretty-printing",
+					"ignoreFailures": true
+				}
+			],
+			"preLaunchTask": "C/C++: g++.exe build active file"
+		},
+		{
+			"name": "remotedebug",
+			"type": "gdb",
+			"request": "launch",
+			"target": "./code/hetm/unit_tests/Runner",
+			"cwd": "${workspaceRoot}",
+			"ssh": {
+				"host": "pascalio.dynu.net",
+				"cwd": "/home/dcastro/projs/HeTM_V1/code/hetm/unit_tests",
+				"pass": "D:\\Users\\Daniel\\.ssh\\id_rsa_daniel",
+				"user": "dcastro"
+			}
+		}
+	]
+}

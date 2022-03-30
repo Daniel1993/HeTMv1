@@ -1,0 +1,1373 @@
+\documentclass[a4paper]{article}
+%
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{url}
+\usepackage{adjustbox}
+\usepackage{algpseudocode}
+\usepackage{algorithm}
+\usepackage{pstricks,pst-node}
+\usepackage[square,comma,sort]{natbib}
+
+\bibliographystyle{unsrtnat}
+
+\newtheorem{definition}{Definition}
+
+\DeclareMathOperator{\inn}{in}
+\DeclareMathOperator{\out}{out}
+
+% STUFF TODO:
+%
+% Choose a font for Max-DAG problem
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corolary}{Corolary}
+
+\author{Lu\'is M. S. Russo\\
+  \texttt{luis.russo@tecnico.ulisboa.pt}
+  \and
+  Daniel Castro\\
+ \texttt{daniel.castro@ist.utl.pt}
+  \and
+  Aleksandar Ilic\\
+  \texttt{aleksandar.ilic@inesc-id.pt}
+  \and
+  Paolo Romano\\
+  \texttt{romano@inesc-id.pt}
+}
+
+%(1000 readers)
+\title{}
+
+%\date{\today}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+%(4 sentences, 100 readers)
+% 1.  State the problem
+% 2.  Say why it’s an interesting problem
+% 3.  Say what your solution achieves
+% 4.  Say what follows from your solution
+
+\end{abstract}
+%
+
+\section{Introduction}
+\label{sec:introduction}
+%(1 page, 100 readers)
+
+\section{The problem}
+\label{sec:problem}
+%(1 page, 10 readers)
+
+\begin{figure}[tb]
+  \begin{center}
+    \begin{pspicture}(0.0,-4.0)(7.5,2.5)
+      %
+      \rput[bl](0,0){
+        \psframe[framearc=0.5](-0.3,-0.3)(7.8,3.0)
+        % 
+        \rput[bl](0,0){
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          & a \\
+          b & c & d & e & f & g \\
+          &   & h & i & j
+          \endpsmatrix
+          % 
+          \psset{arrowsize=0.15}
+          % 
+
+          % SCC
+          \ncline{->}{1,2}{2,2}
+          \ncline{->}{2,2}{2,1}
+          \ncline{->}{2,1}{1,2}
+
+          % SCC
+          \ncline{->}{2,3}{2,4}
+          \ncline{->}{2,4}{3,3}
+          \ncline{->}{3,3}{2,3}
+          \ncline{->}{3,3}{3,4}
+          \ncline{->}{3,4}{2,4}
+
+          \psset{arcangle=30}
+          % SCC
+          \ncarc{->}{2,5}{3,5}
+          \ncarc{->}{3,5}{2,5}
+
+          % Inter connections
+          \ncline{->}{1,2}{2,3}
+          \ncline{->}{1,2}{2,5}
+
+          \ncline{->}{2,2}{2,3}
+
+          \ncline{->}{2,4}{2,5}
+          \ncline{->}{3,4}{3,5}
+
+          \ncline{->}{2,5}{2,6}
+          % 
+        }
+      }
+      %
+      % Now the solution
+      %
+      \rput[bl](0,-3.5){
+        \psframe[framearc=0.5](-0.3,-0.3)(7.8,3.0)
+        % 
+        \rput[bl](0,0){
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          & a \\
+          b &   & d &   &  & g \\
+          &   & h & i & j
+          \endpsmatrix
+          % 
+          \psset{arrowsize=0.15}
+          % 
+
+          % SCC
+%          \ncline{->}{1,2}{2,2}
+%          \ncline{->}{2,2}{2,1}
+          \ncline{->}{2,1}{1,2}
+
+          % SCC
+%          \ncline{->}{2,3}{2,4}
+%          \ncline{->}{2,4}{3,3}
+          \ncline{->}{3,3}{2,3}
+          \ncline{->}{3,3}{3,4}
+ %         \ncline{->}{3,4}{2,4}
+
+          \psset{arcangle=30}
+          % SCC
+%          \ncarc{->}{2,5}{3,5}
+%          \ncarc{->}{3,5}{2,5}
+
+          % Inter connections
+          \ncline{->}{1,2}{2,3}
+%          \ncline{->}{1,2}{2,5}
+
+%          \ncline{->}{2,2}{2,3}
+
+%          \ncline{->}{2,4}{2,5}
+          \ncline{->}{3,4}{3,5}
+
+%          \ncline{->}{2,5}{2,6}
+          % 
+        }
+      }
+    \end{pspicture}
+  \end{center}
+  %
+  \caption{Illustration of the max-DAG problem}
+  \label{fig:problem}
+\end{figure}
+
+\section{Simulated Annealing}
+\label{sec:my-idea}
+%(2 pages, 10 readers)
+%
+We propose a simple simulated annealing algorithm to determine the maximum
+sub-DAG. A state consists in a sub-DAG. This DAG corresponds to the
+sub-graph induced by a set $V'$ of vertexes, that is a sub-set of the set
+of vertexes $V$ of the original graph $G_D = (V, E_D)$. At each step a
+candidate vertex $v$ is chosen. The candidate is chosen from $V \setminus
+V'$. The goal is to add $v$ to $V'$. Hence we need to test whether the
+sub-graph induced by $V' \cup \{v\}$ still is a DAG. If so $v$ can be
+safely added to $V'$, otherwise $v$ is part of at least one cycle in the
+induced sub-graph.
+
+If it is safe to add $v$ to $V'$ this process can be executed without
+further decisions. Otherwise a harder decision presents itself, either $v$
+is rejected, which means that it is not added to $V'$, or other vertexes of
+$V'$ need to be removed so that $v$ can be accepted. This decision depends
+on how many vertexes need to be removed from $V'$. Hence we determine a
+sub-set $V'' \subseteq V'$ such that sub-graph induced by $V'' \cup \{v\}$
+is a DAG. Ideally $V''$ should be as large as possible. Assume for now that
+we can obtain such a set $V''$. The choice the simulated annealing
+procedure must ponder is whether $v$ gets rejected and $V'$ is kept intact
+or whether $v$ is accepted, in which case $V'$ is replaced by $V'' \cup
+\{v\}$. The simulated annealing decides by considering the value $\Delta
+E=1-|V' \setminus V''|$. In each step the algorithm is allowed a limit
+$\ell$ that specifies how much energy the current optima can loose. If
+$\ell \leq \Delta E$ then the modification is allowed, meaning that the
+candidate $v$ is accepted, even though this decreases the current optimum
+value. Otherwise candidate $v$ is rejected. The value $\ell$ is determined
+by the current temperature value $t$ and a random number, chosen uniformly
+from the interval $[0,1]$. A precise description is given in
+Section~\ref{sec:related-work}.
+
+In this section we prefer to focus on how to effectively determine
+$V''$. This is again an instance of our maximum sub-DAG problem. Even
+though we can execute a depth first search, or Tarjan's algorithm, to
+identify which vertexes are involved in cycles it is not immediately clear
+which ones should be removed. Hence we use an heuristic approach, which
+moreover is faster than the $O(|V|+|E_D|)$ time bound required by a
+DFS. This is a very expensive requirement for a single decision of the
+algorithm. Our heuristic requires $O(V \log V)$ time, more precisely
+$O(d(v) \log V)$ time, where $d(v)$ represents the degree of the candidate
+node\footnote{In directed graphs there is both in-degree and out-degree,
+  respectively the number of edges $(u,v) \in E_D$ and $(v,u) \in E_D$ for
+  some $u$. By degree we mean the sum of both these values.}.  Our decision
+algorithm can actually be even faster, the $O(d(v) \log V)$ bound is for
+the worst case.
+
+However this decision is not precise, meaning that it underestimates the
+set $V''$. It however has the crucial guarantee that the sub-graph induced
+by $V'' \cup \{v\}$ is a DAG. This imprecision means that the annealing
+procedure will reject candidates that could have been accepted. We use
+several approaches to mitigate this consequence. The simplest method is to
+choose a higher temperature parameter, as this gives more slack to vertexes
+that would otherwise be rejected. A more efficient method is to reorganize
+the current DAG so that the decision becomes more precise. This is a costly
+operation and improving the precision for a node $v$ might decrease the
+precision for other nodes. Hence we use this process sparingly.
+
+Our procedure is the following. Since the sub-graph induced by $V'$ is a
+DAG we keep it sorted, by some topological ordering, i.e.,
+$s:V' \mapsto \{0, \ldots, |V'|-1\}$ is a bijection. Whenever a candidate
+node $v$ is being evaluated we determine the positions of the incoming
+edges and outgoing edges. Precisely we determine the maximum position of
+the incoming edges and the minimum position of the outgoing edges as
+follows:
+%
+ \begin{itemize}
+ \item $\max(v) = \max \{s(u)\ |\ (u, v) \in E_D\}$
+ \item $\min(v) = \min \{s(u)\ |\ (v, u) \in E_D\}$
+ \end{itemize}
+ %
+ %
+ Whenever $\max(v) < \min(v)$ the candidate vertex $v$ is safe, because $v$
+ is not involved in any cycle in $V' \cup \{v\}$. Hence $v$ can be safely
+ added to $V'$. On the other hand when $\max(v) \geq \min(v)$ it may be the
+ case that $v$ is part of some cycle. We do not exactly determine whether
+ it actually is part of some cycle. Instead we focus on identifying a set
+ of incompatible nodes $I(v)$ such that in $V' \setminus I(v)$ the
+ corresponding values $\max(v)$ and $\min(v)$ respect the desired
+ inequality that $\max(v) < \min(v)$.
+
+ A simple choice for $I(v)$ are the vertexes $u$ of $V'$ for which
+ $\min(v) \leq s(u) \leq \max(v)$ and $(v,u) \in E_D$. In Section~\ref{} we
+ consider a more general processes to obtain $I(v)$, for simplicity we
+ will, for now, restrict our attention to this choice.
+ Figure~\ref{fig:selection} illustrates this choice. The edges linking
+ vertexes in $V'$ are drawn with dashed gray lines. The edges between nodes
+ of $V'$ and the candidate node $v$ are drawn with solid black lines. The
+ vertexes are labeled directly with the $s(v)$
+ values. Figure~\ref{fig:selection} illustrates three examples. In the top
+ example we have that $\max(v) = 2 < 3 = \min(v)$. In this example it is
+ safe to add $v$ to $V'$. In the middle example we have that
+ $\min(v) = 2 \leq 4 = \max(v)$. In this case the annealing procedure needs
+ to make a choice. We have that $I(v) = \{2, 3\}$, because these nodes are
+ less than or equal to $4 = \max(v)$ and the edges $(v, 2)$ and $(v, 3)$
+ are part of the graph. If the choice is favorable to $v$ nodes $2$ and $3$
+ must be removed before $v$ is added. This consequence is highlighted by
+ the gray background of these nodes. The bottom case is almost identical to
+ the middle case. The decision and consequences are the same. However in
+ this example removing $2$ and $3$ was not actually necessary. Note that
+ node $4$ is not restricted by any of edges in the sub-graph and might just
+ as well be located before node $0$ in the topological order, in which case
+ the candidate node $v$ would have no problems being accepted and its
+ acceptance would entail no removals. However our selection procedure is
+ not able to reach this conclusion, instead it behaves as in the middle
+ case. This is a necessary trade-off for the fast performance of the
+ decision heuristic we propose. We will now explain how to implement this
+ heuristic efficiently and also how to mitigate its imprecise decisions.
+%
+ \begin{figure}[tb]
+   \begin{center}
+%     \begin{pspicture}(0,-12)(13,2)
+     \begin{pspicture}(0,-9)(9.75,1.5)
+     \psscalebox{0.75}{
+       %
+       \psset{arrowsize=0.25}
+       %
+       \rput(0.5,0.0){
+         %
+         \psframe[framearc=0.5](-0.5,-2.0)(12.5,2.5)
+         %
+         \cnodeput(0,0){0}{0}
+         \cnodeput(2,0){1}{1}
+         \cnodeput(4,0){2}{2}
+         \cnodeput(6,0){3}{3}
+         \cnodeput(8,0){4}{4}
+         \cnodeput(10,0){5}{5}
+         \cnodeput(12,0){6}{6}
+         \nput[rot=0,labelsep=0]{50}{2}{$\max(v)$}
+         \nput[rot=40]{60}{3}{$\min(v)$}
+         %
+         \psset{linecolor=black!70}
+         \psset{linestyle=dashed}
+         %
+         \ncline{->}{0}{1}
+         \ncline{->}{1}{2}
+         \ncline{->}{2}{3}
+         \ncline{->}{3}{4}
+         \ncline{->}{4}{5}
+         \ncline{->}{5}{6}
+         %
+         \psset{arcangle=30}
+         \ncarc[arcangle=40]{->}{0}{6}
+         \ncarc{->}{0}{2}
+         \ncarc[arcangle=40]{->}{3}{6}
+         \ncarc{->}{3}{5}
+         %
+         \psset{linecolor=black}
+         \psset{linestyle=solid}
+         \cnodeput(5,-1.5){v}{$v$}
+         %
+         \ncline{->}{0}{v}
+         \ncline{->}{2}{v}
+         \ncline{->}{v}{3}
+         \ncline{->}{v}{4}
+         \ncline{->}{v}{6}
+       }
+       %
+       \rput(0.5,-5.0){
+         %
+         \psframe[framearc=0.5](-0.5,-2.0)(12.5,2.5)
+         %
+         \cnodeput(0,0){0}{0}
+         \cnodeput(2,0){1}{1}
+         \cnodeput[fillcolor=black!25,fillstyle=solid](4,0){2}{2}
+         \cnodeput[fillcolor=black!25,fillstyle=solid](6,0){3}{3}
+         \cnodeput(8,0){4}{4}
+         \cnodeput(10,0){5}{5}
+         \cnodeput(12,0){6}{6}
+         \nput[rot=0,labelsep=0]{50}{2}{$\min(v)$}
+         \nput[rot=0,labelsep=0]{-60}{4}{$\max(v)$}
+         %
+         \psset{linecolor=black!70}
+         \psset{linestyle=dashed}
+         %
+         \ncline{->}{0}{1}
+         \ncline{->}{1}{2}
+         \ncline{->}{2}{3}
+         \ncline{->}{3}{4}
+         \ncline{->}{4}{5}
+         \ncline{->}{5}{6}
+         %
+         \psset{arcangle=30}
+         \ncarc[arcangle=40]{->}{0}{6}
+         \ncarc{->}{0}{2}
+         \ncarc[arcangle=40]{->}{3}{6}
+         \ncarc{->}{3}{5}
+         %
+         \psset{linecolor=black}
+         \psset{linestyle=solid}
+         \cnodeput(5,-1.5){v}{$v$}
+         %
+         \ncline{->}{0}{v}
+         \ncline{->}{v}{2}
+         \ncline{->}{v}{3}
+         \ncline{->}{4}{v}
+         \ncline{->}{v}{6}
+       }
+       %
+       \rput(0.5,-10.0){
+         %
+         \psframe[framearc=0.5](-0.5,-2.0)(12.5,2.5)
+         %
+         \cnodeput(0,0){0}{0}
+         \cnodeput(2,0){1}{1}
+         \cnodeput[fillcolor=black!25,fillstyle=solid](4,0){2}{2}
+         \cnodeput[fillcolor=black!25,fillstyle=solid](6,0){3}{3}
+         \cnodeput(8,0){4}{4}
+         \cnodeput(10,0){5}{5}
+         \cnodeput(12,0){6}{6}
+         \nput[rot=0,labelsep=0]{50}{2}{$\min(v)$}
+         \nput[rot=0,labelsep=0]{-60}{4}{$\max(v)$}
+         %
+         \psset{linecolor=black!70}
+         \psset{linestyle=dashed}
+         %
+         \ncline{->}{0}{1}
+         \ncline{->}{1}{2}
+         \ncline{->}{2}{3}
+         % \ncline{->}{3}{4}
+         \ncline{->}{4}{5}
+         \ncline{->}{5}{6}
+         %
+         \psset{arcangle=30}
+         \ncarc[arcangle=40]{->}{0}{6}
+         \ncarc{->}{0}{2}
+         \ncarc[arcangle=40]{->}{3}{6}
+         \ncarc{->}{3}{5}
+         %
+         \psset{linecolor=black}
+         \psset{linestyle=solid}
+         \cnodeput(5,-1.5){v}{$v$}
+         %
+         \ncline{->}{0}{v}
+         \ncline{->}{v}{2}
+         \ncline{->}{v}{3}
+         \ncline{->}{4}{v}
+         \ncline{->}{v}{6}
+       }
+       %
+     }
+     \end{pspicture}
+   \end{center}
+   \caption{Illustration of vertex evaluation.}
+   \label{fig:selection}
+ \end{figure}
+ %
+%
+\section{The details}
+\label{sec:details}
+%(5 pages, 3 readers)
+%
+In this section we will explain how to efficient implement the decision
+heuristic described in Section~\ref{sec:my-idea} and also a global
+re-organizing procedure that mitigates the limitations of the decision
+heuristic. However before we explain these procedures it is important to
+establish some results related to the nature of the problem we are
+considering. In particular we will establish that the problem is NP-Hard
+and Poly-APX-complete. This validates our simulated annealing approach, as
+it is unlikely that there exist polynomial time algorithms that can solve
+or approximate this problem, with a constant or poly logarithmic
+approximation ratio.
+%
+
+\subsection{Complexity Analysis}
+\label{sec:complexity-analysis}
+%
+\begin{figure}[tb]
+  \label{fig:reduction}
+  \begin{center}
+    %
+    \begin{pspicture}(9,4)
+      %
+      \rput(0.5,0.5){
+        %
+        %
+        \cnodeput(0,0){1}{$1$}
+        \cnodeput(3,0){2}{$2$}
+        \cnodeput(3,3){3}{$3$}
+        \cnodeput(0,3){4}{$4$}
+        \cnodeput(1,2){5}{$5$}
+        \cnodeput(1,1){6}{$6$}
+        \cnodeput(2,1){7}{$7$}
+        \cnodeput(2,2){8}{$8$}
+        %
+        \ncline{-}{1}{2}
+        \ncline{-}{2}{3}
+        \ncline{-}{3}{4}
+        \ncline{-}{4}{1}
+        %
+        \ncline{-}{5}{6}
+        \ncline{-}{6}{7}
+        \ncline{-}{7}{8}
+        \ncline{-}{8}{5}
+        %
+        \ncline{-}{1}{6}
+        \ncline{-}{4}{5}
+        \ncline{-}{3}{8}
+        \ncline{-}{7}{2}
+      }
+
+      \rput(5.5,0.5){
+        %
+        \psset{arrowsize=0.15}
+        \psset{arcangle=15}
+        %
+        \cnodeput(0,0){1}{$1$}
+        \cnodeput(3,0){2}{$2$}
+        \cnodeput(3,3){3}{$3$}
+        \cnodeput(0,3){4}{$4$}
+        \cnodeput(1,2){5}{$5$}
+        \cnodeput(1,1){6}{$6$}
+        \cnodeput(2,1){7}{$7$}
+        \cnodeput(2,2){8}{$8$}
+        %
+        \ncarc{->}{1}{2}
+        \ncarc{->}{2}{1}
+        \ncarc{->}{2}{3}
+        \ncarc{->}{3}{2}
+        \ncarc{->}{3}{4}
+        \ncarc{->}{4}{3}
+        \ncarc{->}{4}{1}
+        \ncarc{->}{1}{4}
+        %
+        \ncarc{->}{5}{6}
+        \ncarc{->}{6}{5}
+        \ncarc{->}{6}{7}
+        \ncarc{->}{7}{6}
+        \ncarc{->}{7}{8}
+        \ncarc{->}{8}{7}
+        \ncarc{->}{8}{5}
+        \ncarc{->}{5}{8}
+        %
+        \ncarc{->}{1}{6}
+        \ncarc{->}{6}{1}
+        \ncarc{->}{4}{5}
+        \ncarc{->}{5}{4}
+        \ncarc{->}{3}{8}
+        \ncarc{->}{8}{3}
+        \ncarc{->}{7}{2}
+        \ncarc{->}{2}{7}
+      }
+      %
+    \end{pspicture}
+    %
+  \end{center}
+  \caption{}
+  \label{fig:reduction}
+\end{figure}
+
+First we show that the problem at hand is NP-complete. In this case we
+consider the sub-DAG problem, which given a graph $G_D = (V, E_D)$ and an
+integer $k$ consists in determining if there is a set of vertexes $V'$ of
+size $k$ such that the sub-graph induced by $V'$ is a DAG.
+%
+\begin{theorem}
+  The Sub-DAG problem is NP-complete.
+\label{teo:NPC}
+\end{theorem}
+%
+\begin{proof}
+  First we show that the Sub-DAG $\in$ NP. For a given graph
+  $G = (V, E_D)$, we consider a sub-set $V' \subseteq V$ of vertices as a
+  certificate. First we check if $V'$ contains exactly $k$ elements, where
+  $k$ is the desired number of vertexes specified by the Sub-DAG instance
+  at hand. This requires only $O(V')$ if $V'$ is given as a linked list of
+  $O(V)$ if it is given as an array of booleans. Verifying that the induced
+  sub-graph is a DAG amounts to checking that it does not contain
+  cycles. This can be solved by executing a DFS on the sub-graph and
+  checking that it does not contain back edges. The resulting algorithm
+  requires $O(V'+E_D)$ time, when the structure that identifies the sub-set
+  $V'$ takes $O(1)$ time to determine if a vertex $v$ is in $V'$ or not. An
+  array of booleans indexed over $V$ suffices. Hence in total a
+  verification algorithm requires $O(V + E)$ time and space, which is
+  polynomial in the size of the input.
+
+  Next we show that Max-DAG is NP-Hard. For this goal we use a
+  reduction from the Independent-Set problem. Given an undirected graph
+  $G = (V, E)$ the Independent-Set problem consists in determining whether
+  there exists a set of vertexes $V' \subseteq V$, of size $k$, such that
+  the induced sub-graph contains no edges, i.e., for any $\{u, v\} \in E$
+  it can not be that both the vertexes exist in $V'$, i.e., either
+  $u \notin V'$ or $v \notin V'$. Given an instance graph $G=(V, E)$, of
+  the Independent-Set problem, we need to build an instance
+  $G_D = (V_D, E_D)$ of the Sub-DAG problem. We illustrate this reduction
+  reduction in Figure~\ref{fig:reduction}. The given undirected graph $G$
+  is shown on the left. The set of vertexes $\{1,3,5,7\}$ is an example of
+  an independent set in this graph.
+
+  For this process we need to construct $G_D$ to be a representation of $G$
+  as a directed graph. In essence for every edge $\{u,v\} \in E$ we will
+  add two edges $(u,v)$ and $(v,u)$ to $E_D$. The set of vertexes is kept
+  unaltered, i.e., $V_D=V$.  We illustrate this construction in
+  Figure~\ref{fig:reduction}. The graph in the right is directed, which is
+  indicated by the arrows at the end of the edges. This construction yields
+  $|V_D| = |V|$ and $|E_D| = 2 |E|$ and therefore can be obtained in linear
+  time and space.
+
+  To finish our reduction we require that the sub-DAG to determine in $G_D$
+  should also have size $k$. Hence to finish this reduction we claim that
+  it is possible to find an independent set of size $k$ for $G$ if and only
+  if it is possible to find a sub-DAG with $k$ vertexes in $G_D$.
+
+  We start by showing that if there is an independent set of size $k$
+  in $G$ then there is a sub-DAG with $k$ vertexes in $G_D$. The reduction
+  is trivial. Given that $V'$ is an independent set of $G$ then $V'$ is
+  also a DAG in $G_D$, because the sub-graph induced by $V'$ in $G_D$
+  contains no edges. Assume by contradiction that $(u,v) \in E_D$ is an
+  edge in the sub-graph induced by $V'$, then $u \in V'$ and $v \in
+  V'$. Hence by construction $\{u,v\}$ must also be an edge in $E$, which
+  is a contradiction because $V'$ should be an independent set but it
+  contains $u$ and $v$ and the edge $\{u,v\}$ exists in $E$.
+
+  Finally we need to show the if we obtain some set of vertexes
+  $V'\subseteq V_D$ such that the induced sub-graph of $G_D$ is a DAG then
+  the set $V'$ is an independent set in $G$. Let $\{u, v\} \in E$ be an
+  edge of $E$ then $(u,v)$ and $(v,u)$ are edges of $E_D$, which form a
+  cycle. Therefore either $u \notin V'$ or $v \notin V'$, otherwise the DAG
+  contained a cycle. Hence $V'$ is an independent set.
+%
+\end{proof}
+%
+This complexity condition seems to imply that a pragmatic approach to the
+problem either consists in studying exponential algorithms or in polynomial
+time approximation algorithms. On closer inspection however even this
+second hypothesis is infeasible, unless P=NP. This is a two fold
+consequence. On the one hand the Max Independent Set is
+Poly-APX-complete. On the other hand the reduction we gave is extremely
+robust and therefore qualifies as an approximation preserving reduction.
+Specifically it qualifies as an S-reduction. The strictest of several
+alternatives, which more over preserve several membership conditions,
+see~\citet{Crescenzi}. The approximation ratio is equal in the Max
+Independent Set and in max-DAG, because it is the exactly the same set
+sub-set $V'$ from the same set of vertexes $V$, only the set of edges is
+modified.
+%
+\begin{corolary}
+The max-DAG problem is Poly-APX-complete under PTAS-reductions.
+  \label{cor:APX}
+\end{corolary}
+%
+\begin{proof}
+  Clearly max-DAG is in Poly-APX. An algorithm which simply chooses one
+  vertex $v$ of $V$ runs in polynomial time and is a $|V|$ approximation
+  to max-DAG, because the maximum DAG must be a sub-set $V'$ of $V$.
+
+  To show that max-DAG is Poly-APX-complete we note that the Max
+  Independent Set is Poly-APX-complete under PTAS-reductions,
+  see~\citet*{Bazgan_2005}. Hence we use the reduction in
+  Theorem~\ref{teo:NPC} to reduce Max Independent Set to max-DAG. Note that
+  S-reductions are also PTAS-reductions. Because the composition of a
+  PTAS-reduction and an S-reduction still is a PTAS-reduction, we only need
+  to confirm that the reduction in Theorem~\ref{teo:NPC} is an S-reduction.
+  Using the notation of~\citet{Crescenzi} we need to describe a function
+  $g$ that transforms solutions of max-DAG into solutions of Max
+  Independent Set, in polynomial time, and preserves the solution
+  measure. Formally $m_A(x, g(x,y)) = m_B(f(x),y)$. This is trivial because
+  a set of vertexes $V'$ that induces a DAG as a sub-graph of the
+  transformed instance $G_D = f(x)$ is also an independent set in the
+  original graph $G=x$, as shown in the proof of
+  Theorem~\ref{teo:NPC}. Hence $g(x,y) = V'$, for $y = V'$. Moreover the
+  measure values in these problems are the number of vertexes in the set
+  $V'$. Therefore the necessary equality simplifies to
+  $m_A(x,g(x,y)) = |V'| = m_B(f(x),y)$.
+\end{proof}
+%
+Even thought it is unlikely that Max Independent Set can be approximated to
+ratio better than a polynomial in polynomial time. Polynomial time
+approximation algorithms do exit for bounded degree graphs. In particular a
+simple greedy algorithm obtains a $(\delta + 2)/3$ approximation ratio, for
+a graph with maximum degree $\delta$. Moreover the same algorithm is also
+guaranteed an approximation ratio of $(d+2)/2$, where $d$ is the average
+degree of the graph. See~\citet*{Halld_rsson_1997}. Hence this algorithm
+strongly influences our approach to the max-DAG problem.
+
+The algorithm works as follows: we start with an initially empty
+independent set $V' = \emptyset$ and an instance graph $G$. At each set we
+choose the vertex $v$ with minimum degree, i.e.,
+$d(v) = \min\{d(v')\ |\ v' \in V\}$, where $d(v)$ represents the degree of
+$v$. By degree we mean the size of its neighbor set
+$N(v) = \{u\ |\ \{v, u\} \in E\}$. The vertex $v$ is added to $V'$ and
+removed, along with its neighbors, from the set $V$. Precisely set
+$V' \leftarrow V' \cup \{v\}$ and
+$V \leftarrow V \setminus (\{v\} \cup N(v))$. Likewise the set $E$ is
+cleaned from edges that connect vertexes that no longer exist in $V$. The
+algorithm terminates when the set $V$ becomes empty. Note that at each step
+the set $V'$ is an independent set.
+
+Consider the following simulated annealing approach algorithm, which is
+similar in spirit to one we use for max-DAG and to the greedy algorithm we
+have just described. We also start with an empty set $V'$, but we keep the
+graph $G$ unmodified. At each step a vertex $v$ is allowed into $V'$ if
+there is no edge $\{u,v\} \in E$ such that $u \in V'$. Such a vertex $u$ is
+incompatible with $v$. On the other hand if such incompatible vertexes $u$
+do exist the annealing algorithm counts how many of them exist. If this
+number is not too big and the temperature and the random choice allow for
+it the vertex $v$ may be allowed into $V'$ anyway. In which case all the
+incompatible vertexes $u$ first need to be removed from $V'$. Note that
+like in the greedy algorithm the degree of a node $v$ plays an important
+role on whether it is allowed in the solution or note. A node $v$ for which
+$d(v)$ is big is unlikely to be allowed into $V'$ because it is likely to
+have incompatible nodes in $V'$. Even if a node with a high degree is
+allowed into $V'$ at some step it will be pressured out because all its
+neighbors are incompatible with it.
+
+%
+% \begin{figure}[tb]
+%   \begin{center}
+%     \begin{pspicture}(0,-3)(7,4)
+%       %
+%       \psset{arrowsize=0.25}
+%       \rput(0.5,0.5){
+%         %
+%         %
+%         \cnodeput(0,0){1}{$A$}
+%         \cnodeput(3,0){2}{$B$}
+%         \cnodeput(3,3){3}{$C$}
+%         \cnodeput(0,3){4}{$D$}
+%         %
+%         \ncline{->}{1}{2}
+%         \ncline{->}{2}{4}
+%         \ncline{->}{3}{2}
+%         \ncline{->}{4}{3}
+%         \ncline{->}{4}{1}
+%       }
+%       %
+%       \rput(0.5,-2.0){
+%         %
+%         \cnodeput(0,0){1}{$A$}
+%         \cnodeput(2,0){2}{$B$}
+%         \cnodeput(6,0){3}{$C$}
+%         \cnodeput(4,0){4}{$D$}
+%         %
+%         \nput{90}{1}{1}
+%         \nput{90}{2}{2}
+%         \nput{-90}{4}{2}
+%         \nput{-90}{3}{1}
+%         %
+%         \ncline{->}{1}{2}
+%         \ncline{->}{2}{4}
+%         \ncline{->}{4}{3}
+%         %
+%         %
+%         \psset{linestyle=dashed}
+%         \psset{linecolor=black!70}
+%         \ncarc[arcangle=30]{->}{4}{1}
+%         \ncarc[arcangle=-30]{->}{3}{2}
+%       }
+%       %
+%     \end{pspicture}
+%   \end{center}
+%   \caption{}
+%   \label{fig:DFS}
+% \end{figure}
+%
+
+\subsection{DAG Data Structures}
+\label{sec:dag-data-structures}
+%
+Given that we now have a rough description of the simulated annealing
+procedure we can discuss the data structures used to implement the decision
+heuristic described in Section~\ref{sec:my-idea}. As explained in that
+Section we aim to maintain a representation of the set $V'$ of vertexes,
+such that the induced sub-graph is a DAG. As the annealing algorithm
+proceeds vertexes get added and removed from $V'$. Moreover for our
+heuristic decision it is necessary to keep this set ordered, by some
+topological order of the DAG. Given these constraints we choose to store the
+vertexes of $V'$ in a binary search tree, in particular we used splay trees
+in our implementation. Any binary search tree provides the operations
+necessary for our algorithm, but a BST with worst case $O(\log V)$
+guarantees would be ideal, such as AVL's or Red-Black trees. Splay trees
+might suffer from occasional worst case bad performance, but they provide
+amortized time guarantees of several desirable time bounds. Given that our
+algorithm performs a sequence of operations the amortized time bounds are
+sufficient. Single operation worst case guarantees are not crucial.
+Storing the sequence of nodes in a BST has the added advantage that
+whenever a node is added or removed the new positions of the nodes are
+obtained automatically. Consider again the example at the top of
+Figure~\ref{fig:selection}. In this case we have that
+$\max(v) = 2 < 3 = \min(v)$ and therefore it is safe to add the node $v$ to
+the set $V''$. This consists in inserting the vertex $v$ into the splay
+tree so that it becomes the new vertex at position $3$. Hence the previous
+vertex at position $3$ becomes the vertex at position $4$, the previous
+vertex at position $4$ becomes the vertex at position $5$ and so on. This
+is obtained with the insertion operation in $O(\log n)$ amortized time in
+splay trees. To determine the current position of a vertex it is enough to
+store the current sub-tree size in each node of the splay tree.
+
+Likewise whenever a node needs to be removed from the set $V'$ it is removed
+from the splay tree. Consider for example the cases in the middle and bottom
+of Figure~\ref{fig:selection}. In these cases the nodes at position $2$ and
+$3$ need to be removed from the splay tree. After this operation, and
+before the node $v$ is inserted, the node that was at position $4$ becomes
+the node that is at position $2$, the node that was at position $5$ becomes
+the node that is at position $3$ and so on.
+
+We can now focus on the exact procedure we use for our decision
+heuristic. According to the description in Section~\ref{sec:my-idea} we
+need to determine $\min(v)$ and $\max(v)$. To determine $\min(v)$ we need
+to visit the neighborhood of $v$, i.e., all the vertexes $u \in V'$ such
+that there exits an edge $(v, u) \in E_D$. Actually we only need the
+neighborhood in the sub-graph induced by $V'$. However, because our graph
+$G_D$ is represented in an adjacency list, we actually end up traversing
+the complete neighborhood of $v$ to obtain the necessary nodes $u$. For
+each node $u$ that is a neighbor a of $v$, i.e., for which a node $(v,u)$
+exists we first check if $u \in V'$, by checking if $u$ is currently in the
+splay tree. If so, we then determine its position in the topological order.
+This is actually the size of the left sub-tree of node $u$, since looking
+up node $u$ involves a splay operation that pulls it to the root of the
+tree. In fact looking up $u$ is slightly tricky, because the splay tree is
+ordered by the topological order. Therefore this process is not computed as
+a search over the tree, instead we keep an array that for each node
+$u \in V$ keeps the information of whether the node is in the tree or not,
+and if so where is it in the tree. To be absolutely precise each node of
+the splay tree is represented by a \texttt{struct node}, that contains
+pointers to the left and right sub-trees and to the parent tree. These
+structs are allocated all at once, at the beginning of the algorithm. They
+are kept in an array that contains exactly $|V|$ elements, each one
+corresponding to a node $u \in V$. We also keep a pointer to the
+\texttt{root} of the splay tree. If a given \texttt{struct} is pointed to
+by the \texttt{root} pointer or has a non \texttt{NULL} parent pointer then
+it is part of the splay tree. Therefore the corresponding node is in
+$V'$. Otherwise the \texttt{struct} is allocated, but is not part of the
+splay tree. Therefore the corresponding node is not in $V'$. Whenever the
+\texttt{struct}, corresponding to node $u$, is in the splay tree, we splay
+it to the root of the tree and use the size of the resulting left sub-tree
+to determine its position in the topological order. Note that this
+representation waists a bit of space, since full \texttt{struct node} space
+is used even for nodes that are not in the splay tree. On the other hand we
+save one level of indirection that would exist in an alternative that used
+an array of single pointers to these \texttt{struct node} elements, which
+would be \texttt{NULL} when the node was not in the splay tree. Saving a
+level of indirection usually yields better cache performance and the space
+penalty is this case is not too steep, particularly when $V'$ is large.
+
+Hence we can determine $\min(v)$ by computing the minimum of all the
+position values obtained in the procedure we just described. Likewise we
+need to compute a similar process to obtain the value $\max(v)$. This time
+we need to determine the nodes $u \in V'$ such that $(u, v) \in E_D$. The
+process is essentially similar to the one we described for $\min(v)$,
+except that this time $v$ is a neighbor of $u$ and not the other way
+around. This means that we also must keep and adjacency list representation
+of the transposed graph $G^T$ in memory. This representation is created
+when the algorithm starts, along with the adjacency list representation of
+the original graph $G_D$. Hence, during a verification procedure this
+information is readily available.
+
+Note that when $\max(v) < \min(v)$ there is no alternative to the previous
+procedure. Therefore there is little opportunity to obtain a better bound
+than $O(V \log V)$ time or more precisely $O(d(v) \log V)$, where $d(v)$ is
+the degree of $v$, obtained by summing both the in-degree and the
+out-degree. However for must verification procedures the resulting
+situation is $\min(v) \leq \max(v)$. In these cases we need to determine
+the set $I(v)$ described in Section~\ref{sec:my-idea}. This is straight
+forward to obtain by first computing $\max(v)$ and then computing
+$\min(v)$. The computation of $\min(v)$, iterates over all the nodes
+$u \in V'$ such that an edge $(v, u)$ exists. For each such node we
+determine its position $s(u)$. To determine $\min(v)$ we compute the
+minimum among the $s(u)$ values. Since $\max(v)$ is already known it is
+possible to determine which of the nodes $u$ are actually in
+$I(v)$. Whenever a node $u \in V'$ is considered in the computation of
+$\min(v)$, because an edge $(v, u)$ exists, we also check if
+$s(u) \leq \max(v)$. If this condition is verified we have that
+$u \in I(v)$. Hence we can determine $I(v)$ in the same $O(d(v) \log V)$
+time bound.
+
+Since this second situation is very frequent it is worthwhile to try to
+improve it. Notice that computing a large set $I(v)$ only to have it be
+rejected by the simulated Annealing process amounts to redundant work. The
+annealing decision depends only on the size of $I(v)$. At each step the
+simulated annealing algorithm determines a value $\Delta E$, which depends
+on the current temperature and a random value number, chosen uniformly from
+$[0,1]$. Whenever $\Delta E \leq 1 - |I(v)|$ the transition is accepted,
+otherwise it is rejected. Hence accepted transitions usually occur for
+negative values of $\Delta E$, in fact, the largest value of $\Delta E$ that
+is significant for this problem is $1$. Any other positive values of
+$\Delta E$ result in rejected transitions. Therefore our generation
+procedure never generates positive values larger than $1$. Generating the
+value $\Delta E$ is fast. Therefore we generate the $\Delta E$ value before
+computing the set $I(v)$. This has the advantage that we do not need to
+compute the complete set $I(v)$. As soon as we identify enough elements in
+$I(v)$ so that the necessary inequality is no longer valid we can abort the
+identification procedure and the corresponding transition. Hence our goal
+is to obtain an $O((1 - \Delta E) \log V)$ time bound for each verification
+process that fails. Our method is not guaranteed to obtain this bound all
+the time. We improve the best case time to this bound and show that our
+solution is effective in practice.
+
+Our technique involves several nuances, which we will now explain and
+simultaneously obtain more general selections of incompatible sets
+$I(v)$. First we store the necessary nodes in BSTs, sorted by their
+position in the topological order. This makes it easy and efficient to
+obtain the $\min(v)$ and $\max(v)$ values, or their current best
+approximations. Precisely we consider the set of nodes
+$\out(v) = \{ u \in V' | (v, u) \in E_D\}$ and
+$\inn(v) = \{ u \in V' | (u, v) \in E_D\}$, which can be used to obtain the
+$\min(v)$ and $\max(v)$ values respectively. Consider the middle example in
+Figure~\ref{fig:selection}. In this case we have $\out(v) = \{2, 3, 6\}$
+and $\inn(v) = \{ 0, 4\}$, yielding $\min(v) = 2$ and $\max(v) = 4$
+respectively. As before if we have $\max(v) = 4$ computed first then
+identifying $I(v)$ can be obtained by searching for $4$ in the BST that
+contains the representation of $\out(v)$. This allows us to divide the set
+$\out(v)$ in two, the set $I(v) = \{ 2, 3 \}$ of elements that are smaller
+than or equal to $4$ and set $\{6 \}$ which contains safe nodes larger than
+$4$. This computation is supported in BSTs, either by simply counting the
+number of elements less than or equal to $4$, or by actually splitting the
+tree in two. We also use splay trees to store the $\inn(v)$ and $\out(v)$
+sets, which provide a simple implementation of both these operations.
+
+An important optimization that we use is the following. Assume that we know
+that $\max(v) = 4$, and that we are in a situation where the simulated
+annealing as decided that $\Delta E = 0$. In this case the transition will
+be rejected because $\Delta E = 0 > 1-2 = 1 - |I(v)|$. Hence the order in
+which we process $\out(v)$ matters. If we obtain $\out(v)$ as $6, 3, 2$
+then only after we receive the number $2$ can we reject the transition. On
+the other hand if we receive $\out(v)$ as $2, 3, 6$ we can reject the
+transition immediately after receiving the number $3$ and therefore there
+is no need to process the number $6$. In this case it is only one number
+but in general this approach reduces the number of vertexes processed from
+$O(d(v))$ to $O(2 - \Delta E)$. For this early termination to be effective
+we need two conditions. We need to search for $\max(v)$ in the intermediate
+configuration of $\out(v)$, i.e., this search is executed every time a new
+node $u$ of $\out(v)$ is identified. We need the nodes in $\out(v)$ to be
+obtained according to the topological order of the DAG. This second
+condition amounts to keeping the adjacency list of a node $v$ sorted
+according to the topological order. In general we can not guarantee this
+requirement, since this order potentially changes with every step of the
+annealing algorithm and updating all the corresponding adjacency lists
+would amount to more work than what this optimization saves. Hence our
+approach is simple and pragmatic. Each time a verification operation is
+executed in node $v$ a prefix of its adjacency list is traversed, namely to
+obtain $\out(v)$. This prefix could be the hole list. At the end of the
+verification procedure this prefix of the adjacency list is sorted,
+according to the topological order, and is used to overwrite the current
+configuration of this prefix in the adjacency list. Hence at the end of
+each verification procedure the corresponding prefix of the list is
+guaranteed to be in the correct order. This optimization guarantees that in
+a subsequent verification of node $v$ the corresponding adjacency list is
+obtained according to the topological order. This reduces the amount of
+nodes that are processed in the second verification from $O(d(v))$ to
+$O(2 - \Delta E)$, provided the topological order has not changed much
+meanwhile and that the second $\Delta E$ does not imply scanning a larger
+prefix. Hence this optimization is only partially effective. In practice it
+does improve performance as will be shown in Section~\ref{}. Note that the
+adjacency list of $v$ will contain nodes $u$ that are not in $V'$, i.e.,
+there are nodes $u \in V \setminus V'$ for which edges $(v, u) \in E_D$
+exist. These nodes are placed at the end of the prefix reordering we
+described. Also note that an inorder traversal of the BST containing the
+partial configuration of $\out(v)$ provides the nodes in the topological
+ordering which is necessary for the prefix overwrite. Hence no extra
+sorting is actually necessary. Thus far in our explanation we assumed that
+the whole set $\inn(v)$ is processed before the set $\out(v)$ is
+considered. This is not actually the case, as such a procedure would not
+actually obtain $O((2 - \Delta E) \log V)$ time, because of its dependency
+on the in-degree of $v$. Note that to obtain this bound we also need to
+reorganize a prefix of the adjacency list of the transposed graph
+$G^T$. This time to keep it in reverse topological order. This is, likewise,
+done by using the reverse inorder sequence of the BST storing the $\inn(v)$
+set.
+
+We finish this section by describing the general procedure for the choice
+of $I(v)$, which is actually used in our implementation. Consider again the
+situation in the middle graph of Figure~\ref{fig:selection}. In case the
+value $\Delta E$ is $0$ the set $I(v) = \{ 2, 3 \}$ is rejected by the
+verification procedure, because it contains two elements and the maximum
+size allowed is size is one. However this rejection is excessive. We could
+have chosen $I(v) = \{ 4 \}$, which contains only one element and therefore
+would be accepted by the verification procedure. Recall that in this
+example we have $\out(v) = \{2, 3, 6\}$ and $\inn(v) = \{ 0, 4\}$. This
+means that we need to consider a wider range of incompatibility sets. Given
+an integer $k$ we consider the set $I(v, k)$, which consists of the nodes
+$u \in \out(v)$ such that $s(u) < k$ and the nodes $u \in \inn(v)$ such
+that $k \leq s(u)$. Recall that in our exposition the nodes are being
+identified by their $s(u)$ values. Hence we have that for our running
+example $I(v, 7) = \{ 2, 3, 6\}$, where these nodes are obtained from
+$\out(v)$. The incompatibility set we have considered so far is
+$I(v, \max(v)+1) = I(v, 5) = \{2, 3 \}$. Consider instead the set
+$I(v, 2) = \{ 4 \}$. This set contains only elements from $\inn(v)$ and is
+smaller. Clearly we could also have considered the sets
+$I(v, 4) = \{ 2, 3, 4\}$ and $I(v, 3) = \{ 2, 4\}$, which actually contain
+vertexes from both sets $\out(v)$ and $\inn(v)$. However these
+incompatibility sets have more than one element. A schematic representation
+of these sets is shown in Figure~\ref{fig:Isets}.
+
+\begin{figure}[tb]
+  \begin{center}
+    %
+    \begin{pspicture}(10.0,4)
+      %
+      \rput[bl](1.0,1.0){
+        \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+        0 & &   &   & 4  \\
+          & & 2 & 3 &   &   & 6
+        \endpsmatrix
+        \ncbox*[linecolor=black!15,linearc=0.3]{1,1}{1,5}
+        \ncbox*[linecolor=black!15,linearc=0.3]{2,3}{2,7}
+        \nput[labelsep=0.5]{180}{1,1}{$\inn(v)$}
+        \nput[labelsep=0.5]{0}{2,7}{$\out(v)$}
+      }
+      \rput[bl](1.0,1.0){
+        \psset{fillstyle=solid}
+        \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+        0 & &   &   & 4  \\
+        & & 2 & 3 &   &   & 6
+        \endpsmatrix
+      }
+      \psset{arrowsize=0.15}
+      \psset{linewidth=0.01}
+      \rput(! 0.0 7.7 mul 7.0 div 1.0 add 1.0){
+        \rput(0.0,2.5){$I(v,0)$}
+        \rput(0.0,-0.3){\psline(0.0, 2.6)}
+        \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+        \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+      }
+      %
+      \rput(! 1.0 7.7 mul 7.0 div 1.0 add 1.0){
+        \rput[t](0.0,-0.4){$I(v,1)$}
+        \rput(0.0,-0.3){\psline(0.0, 2.6)}
+        \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+        \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+      }
+      %
+      \rput(! 2.0 7.7 mul 7.0 div 0.9 add 1.0){
+        \rput(0.0,2.5){$I(v,2)$}
+        \rput(0.0,-0.3){\psline(0.0, 2.6)}
+        \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+        \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+      }
+      %
+      \rput(! 3.0 7.7 mul 7.0 div 1.0 add 1.0){
+        \rput[t](0.0,-0.4){$I(v,3)$}
+        \rput(0.0,-0.3){\psline(0.0, 2.6)}
+        \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+        \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+      }
+      %
+      \rput(! 4.0 7.7 mul 7.0 div 1.0 add 1.0){
+        \rput(0.0,2.5){$I(v,4)$}
+        \rput(0.0,-0.3){\psline(0.0, 2.6)}
+        \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+        \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+      }
+      %
+      \rput(! 5.0 7.7 mul 7.0 div 1.2 add 1.0){
+        \rput[t](0.0,-0.4){$I(v,5)$}
+        \rput(0.0,-0.3){\psline(0.0, 2.6)}
+        \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+        \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+      }
+      %
+      \rput(! 7.0 7.7 mul 7.0 div 1.2 add 1.0){
+        \rput[t](0.0,-0.4){$I(v,7)$}
+        \rput(0.0,-0.3){\psline(0.0, 2.6)}
+        \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+        \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+      }
+      %
+    \end{pspicture}
+    %
+  \end{center}
+  \caption{Schematic representation of incompatibility sets.}
+  \label{fig:Isets}
+\end{figure}
+
+We need a general procedure to determine if there is some set $I(v, k)$
+such that $\Delta E \leq 1 - |I(v, k)|$. Our procedure works by
+interleaving the iteration of the adjacency lists of $v$ in $G_D$ and in
+$G^T$, i.e., we alternate between considering the nodes $u$ because there
+is an outward edge of $v$, $(v, u) \in E_D$, and because there is an inward
+edge into $v$, $(u, v) \in E_D$. Whenever appropriate these vertexes are
+added to the corresponding BST, the one for $\out(v)$ and the one for
+$\inn(v)$ respectively. In general the search proceeds while there is at
+least one value of $k$ for which $\Delta E \leq 1 - |I(v, k)|$. Note that
+we can compute the value $|I(v, k)|$ in $O(\log V)$ amortized time using
+splay trees. Hence the verification procedure keeps track of an interval
+$[a,b]$, such that any value of $k$ for which the desired condition holds
+must belong to this interval. This interval is initialized with $a = 0$ and
+$b = |V|$. This matches the fact that initially the BSTs are empty and
+therefore all current $I(v, k)$ are also empty. Whenever the process
+considers a node $u \in V'$ that is a neighbor of $v$, i.e.,
+$(v, u) \in E_D$, then the value of $b$ may need to be decreased. For
+example suppose that $\Delta E = 0$ in the middle graph of
+Figure~\ref{fig:selection} that we are currently considering. Assume that
+we first consider the nodes $3$ and $4$, which are added to the BSTs
+corresponding to $\out(v)$ and $\inn(v)$ respectively. At this point the
+values of $a$ and $b$ are still the initial values. Therefore the
+corresponding interval is still $[0, 7]$. Now assume that the algorithm
+needs to process the node $u = 2$. At this point the set $I(v, 7)$
+contains, at least, the vertexes $2$ and $3$. Therefore the value of $b$
+needs to decrease. To decrease this value we consider all the currently
+known positions of $\out(v)$. In this case we have $\{ 2, 3\}$. Therefore
+$b$ is reduced to $3$. The number of elements known to be inside $I(v, 4)$
+is computed. This value is two, therefore we need to further reduce $b$ to
+$2$. The number of elements known to be inside $I(v, 2)$ is one. Hence
+$b = 2$. Now assume that we need to process the node $u = 0$. After this
+new node is added to $\inn(v)$ the number of elements known to be in
+$I(v,a) = I(v, 0)$ is at least two. Therefore we need to increase the value
+of $a$. Increasing an index is slightly different from decreasing, because
+this time we consider the set of known positions in $\inn(v)$ increased by
+$1$, i.e., in this example $\{1, 5\}$. Hence we increase $a$ to $1$. Again
+we verify that the set $I(v, 1)$ is known to have at most one element and
+therefore $a$ is kept at value $1$. Hence at this point our current search
+interval $[a,b]$ is $[1,2]$. The search can still proceed because this
+interval is not empty. Hence assume that the search now processes node
+$u = 6$. This node is added to the BST corresponding to $\out(v)$, but has
+no impact in the value of $I(v, 2)$. Hence the value $b$ is kept
+unaltered. An illustration of the procedure we just described is shown in
+Figure~\ref{fig:Ireduction}. The top part shows the reduction of position
+$b$ and the bottom part the increase of position $a$.
+
+At this point there are no more nodes to consider. Therefore the search
+terminates. The search ended with $1 = a \leq b = 2$. Hence the
+verification process accepts the transition and node $v$ will be added to
+$V'$. However an incompatibility set must first be removed from $V'$. We
+can only use $I(v, 1)$ or $I(v, 2)$, in general we can use any integer in
+$[a,b]$. To maximize the size of the sub-DAG it is best to minimize the
+number of nodes that need to be removed. Hence we search for some integer
+$k \in [a,b]$ such that $|I(v,k)|$ is as small as possible. We use the
+increasing operation described in the previous paragraph. Therefore this
+scan requires $O(d(v) \log V)$ time instead of $O((1+b-a) \log V)$. On the
+other hand whenever the interval $[a,b]$ becomes empty during the
+verification procedure, because at some point we have $b < a$, the
+verification procedure terminates immediately by rejecting the
+transition. When all the known nodes in $\in(v)$ are greater than all the
+known nodes in $\out(v)$ it is only necessary to process $O(2 -\Delta E)$
+nodes to reach this rejecting verdict. Hence this is the reason our
+optimization technique tries to maintain the adjacency lists of $G$ sorted
+according to the topological order and the adjacency lists of $G^T$ in
+reverse topological order.
+
+\begin{figure}[tb]
+  \begin{center}
+    %
+    \begin{pspicture}(10.0,8.0)
+      %
+      \rput[bl](0.0,4.0){
+        \rput[bl](1.0,1.0){
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          0 & &   &   & 4  \\
+          & & 2 & 3 &   &   & 6
+          \endpsmatrix
+          \ncbox*[linecolor=black!15,linearc=0.3]{1,1}{1,5}
+          \ncbox*[linecolor=black!15,linearc=0.3]{2,3}{2,7}
+          \nput[labelsep=0.5]{180}{1,1}{$\inn(v)$}
+          \nput[labelsep=0.5]{0}{2,7}{$\out(v)$}
+        }
+        \rput[bl](1.55,1.0){
+          \psset{fillstyle=solid}
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          & &   &   & 4  \\
+          & & 2 & 3 &   &   &
+          \endpsmatrix
+        }
+        \psset{arrowsize=0.15}
+        \psset{linewidth=0.01}
+        %
+        \rput(! 2.0 7.7 mul 7.0 div 0.9 add 1.0){
+          \rput(0.0,2.5){$I(v,2)$}
+          \rput(0.0,-0.3){\psline(0.0, 2.6)}
+          \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+          \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+        }
+        %
+        \rput(! 3.0 7.7 mul 7.0 div 1.0 add 1.0){
+          \rput[t](0.0,-0.4){$I(v,3)$}
+          \rput(0.0,-0.3){\psline(0.0, 2.6)}
+          \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+          \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+        }
+        %
+        \rput(! 7.0 7.7 mul 7.0 div 1.2 add 1.0){
+          \rput[t](0.0,-0.4){$I(v,7)$}
+          \rput(0.0,-0.3){\psline(0.0, 2.6)}
+          \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+          \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+        }
+      }
+      %
+      \rput[bl](0.0,0.0){
+        \rput[bl](1.0,1.0){
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          0 & &   &   & 4  \\
+          & & 2 & 3 &   &   & 6
+          \endpsmatrix
+          \ncbox*[linecolor=black!15,linearc=0.3]{1,1}{1,5}
+          \ncbox*[linecolor=black!15,linearc=0.3]{2,3}{2,7}
+          \nput[labelsep=0.5]{180}{1,1}{$\inn(v)$}
+          \nput[labelsep=0.5]{0}{2,7}{$\out(v)$}
+        }
+        \rput[bl](1.0,1.0){
+          \psset{fillstyle=solid}
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          0 & &   &   & 4  \\
+          & & 2 & 3 &   &   &
+          \endpsmatrix
+        }
+        \psset{arrowsize=0.15}
+        \psset{linewidth=0.01}
+        \rput(! 0.0 7.7 mul 7.0 div 1.0 add 1.0){
+          \rput(0.0,2.5){$I(v,0)$}
+          \rput(0.0,-0.3){\psline(0.0, 2.6)}
+          \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+          \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+        }
+        %
+        \rput(! 1.0 7.7 mul 7.0 div 1.0 add 1.0){
+          \rput[t](0.0,-0.4){$I(v,1)$}
+          \rput(0.0,-0.3){\psline(0.0, 2.6)}
+          \rput(0.0,1.35){\psline{->}(0.1,0.0)}
+          \rput(0.0,0.3){\psline{->}(-0.1,0.0)}
+        }
+        %
+      }
+      %
+    \end{pspicture}
+    %
+  \end{center}
+  \caption{Schematic representation of range reduction. The top shows how
+    to reduce value $b$ and the bottom how to increase value $a$.}
+  \label{fig:Ireduction}
+\end{figure}
+%
+
+\subsection{Optimizing Initial State}
+\label{sec:optim-init-state}
+%
+In this section we present of some choices used to optimize the initial
+state of the annealing process. The first technique is to separate the
+initial graph into strongly connected components. In particular we used the
+algorithm by~\citet*{Tarjan_1972}. Other efficient algorithms exist
+see~\citet*{Sharir_1981} and~\citet*{cormen2009introduction}. This requires
+only linear time, $O(V+E)$. This process discards all the edges across
+components and keeps only the edges where both vertexes belong to the same
+component. Also we use this algorithm to sort the components into
+topological order, of the component graph, thereby ensuring that the
+combination of the individual solutions is a global topological order. An
+example of this procedure is show in Figure~\ref{fig:isolation}. The bottom
+graph contains only edges inside a component and the components are in
+topological order from left to right.
+
+\begin{figure}[tb]
+  \begin{center}
+    \begin{pspicture}(0.0,-4.0)(7.5,2.5)
+      %
+      \rput[bl](0,0){
+        \psframe[framearc=0.5](-0.3,-0.3)(7.8,3.0)
+        % 
+        \rput[bl](0,0){
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          & a \\
+          b & c & d & e & f & g \\
+          &   & h & i & j
+          \endpsmatrix
+          % 
+          \psset{arrowsize=0.15}
+          % 
+
+          % SCC
+          \ncline{->}{1,2}{2,2}
+          \ncline{->}{2,2}{2,1}
+          \ncline{->}{2,1}{1,2}
+
+          % SCC
+          \ncline{->}{2,3}{2,4}
+          \ncline{->}{2,4}{3,3}
+          \ncline{->}{3,3}{2,3}
+          \ncline{->}{3,3}{3,4}
+          \ncline{->}{3,4}{2,4}
+
+          \psset{arcangle=30}
+          % SCC
+          \ncarc{->}{2,5}{3,5}
+          \ncarc{->}{3,5}{2,5}
+
+          % Inter connections
+          \ncline{->}{1,2}{2,3}
+          \ncline{->}{1,2}{2,5}
+
+          \ncline{->}{2,2}{2,3}
+
+          \ncline{->}{2,4}{2,5}
+          \ncline{->}{3,4}{3,5}
+
+          \ncline{->}{2,5}{2,6}
+          % 
+        }
+      }
+      %
+      % Now the solution
+      %
+      \rput[bl](0,-3.5){
+        \psframe[framearc=0.5](-0.3,-0.3)(7.8,3.0)
+        % 
+        \rput[bl](0,0){
+          \psmatrix[mnode=circle,colsep=0.8,rowsep=0.5]
+          & a \\
+          b & c & d & e & f& g \\
+          &   & h & i & j
+          \endpsmatrix
+          % 
+          \psset{arrowsize=0.15}
+          % 
+
+          % SCC
+          \ncline{->}{1,2}{2,2}
+          \ncline{->}{2,2}{2,1}
+          \ncline{->}{2,1}{1,2}
+
+          % SCC
+          \ncline{->}{2,3}{2,4}
+          \ncline{->}{2,4}{3,3}
+          \ncline{->}{3,3}{2,3}
+          \ncline{->}{3,3}{3,4}
+          \ncline{->}{3,4}{2,4}
+
+          \psset{arcangle=30}
+          % SCC
+          \ncarc{->}{2,5}{3,5}
+          \ncarc{->}{3,5}{2,5}
+
+          % Inter connections
+        }
+      }
+    \end{pspicture}
+  \end{center}
+  %
+  \caption{Illustration of SCC isolation.}
+  \label{fig:isolation}
+\end{figure}
+%
+
+The second approach is to use an approximation algorithm. In
+Section~\ref{sec:complexity-analysis} we showed that the max-DAG problem is
+Poly-APX-complete, see~\ref{cor:APX}. This fact results from a reduction of
+the Independent Set problem. Therefore we are not focusing on an
+approximation algorithm for the max-DAG, but for its complement. The
+complement of an Independent Set is a Vertex Cover. Polynomial time
+algorithms that obtain a $2$ approximation are known,
+see~\citet*{cormen2009introduction} or~\citet*{garey1979computers}
+or~\citet*{papadimitriou1998combinatorial}. We use this algorithm to
+pick an initial state for our annealing algorithm.
+
+Given a graph $G_D = (V, E_D)$ and an ordering of the vertexes
+$s:V' \mapsto \{0, \ldots, |V'|-1\}$ we can classify edges as forward or
+backward. An edge $(u, v) \in E_D$ is a backward edge iff $s(u) \geq
+s(v)$. Otherwise it is a forward edge. Recall that $s$ is a
+bijection. Notice that this classification is not an intrinsic of an edge,
+because it is influence by the ordering. Different orderings provide
+different classifications.
+
+For our objectives the important consequence of this classification is that
+the graph $G_D$ is a DAG iff there is some ordering such that no edge is
+backward. Hence our approximation approach consists in removing vertexes
+from $G_D$ so that the resulting graph has no backward edges.
+
+Consider the set of backwards edges $B_s \subseteq E_D$ and let $V''$ be a
+vertex cover of the graph composed of these edges, i.e., the graph given by
+$(V, B_s)$. Note that the notion of vertex cover is usually defined on
+undirected graphs so assume that after we classify the edges its direction
+is ignored. Precisely, by a set cover we mean a set of vertexes $V''$ such
+that for any backward edge $(u, v) \in B_s$ at least one of the vertexes
+must be in $V''$, i.e., $u \in V''$ or $v \in V''$.
+
+Our observation is that the sub-graph induced by $V \setminus V''$ is a
+DAG. This can easily be established. If this graph contained a cycle then
+at least some edge $(u,v)$ in that cycle would be a backward edge and
+therefore either $u$ or $v$ would be in $V''$, which would cut the
+cycle.
+
+We use a $2$ approximation algorithm to obtain $V''$ in $O(V+E)$
+time. Still this does not guarantee that we obtain a $2$ complement
+approximation of the max-DAG problem. The reason being that the vertex
+cover we obtain depends on $s$. Hence to obtain a $2$ complement
+approximation we would need to check all possible such orderings, which is
+impractical. Instead we use the ordering provided by Tarjan's
+algorithm. Our experimental results show that the resulting algorithm is
+usually very far from a $2$ complement approximation, but the resulting
+max-DAG approximation is very good.
+
+We illustrate this result with a torus grid graph. 
+
+\section{Related work}
+\label{sec:related-work}
+%(1-2 pages, 10 readers)
+
+\section{Conclusions and further work}
+\label{sec:concl-furth-work}
+%(0.5 pages)
+
+\section{Acknowledgments}
+\label{sec:acknowledgements}
+%
+The work reported in this article was supported by national funds through
+Funda\c{c}\~{a}o para a Ci\^{e}ncia e a Tecnologia (FCT) with reference
+UIDB/50021/2020 and project NGPHYLO PTDC/CCI-BIO/29676/2017.
+%
+\bibliography{biblio}
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:
+{

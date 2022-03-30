@@ -1,0 +1,6 @@
+
+using the following command to debug (change input file)
+
+$ valgrind --tool=memcheck --vgdb=yes --vgdb-error=0 ./project ../deps/pr-stm/bank_dev0_vert2560.in 0.3 1 0.2 1 4 2
+
+### https://www.overleaf.com/9212821584jzbrfspmskpb

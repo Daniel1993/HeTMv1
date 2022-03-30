@@ -1,0 +1,135 @@
+\documentclass{article}
+\usepackage{pstricks,pst-node}
+\pagestyle{empty}
+\begin{document}
+
+\begin{pspicture}[showgrid](0,-12)(13,2)
+  %
+\psset{arrowsize=0.25}
+%
+\rput(0.5,0.0){
+%
+\psframe[framearc=0.5](-0.5,-2.0)(12.5,2.3)
+  % 
+  \cnodeput(0,0){0}{0}
+  \cnodeput(2,0){1}{1}
+  \cnodeput(4,0){2}{2}
+  \cnodeput(6,0){3}{3}
+  \cnodeput(8,0){4}{4}
+  \cnodeput(10,0){5}{5}
+  \cnodeput(12,0){6}{6}
+  \nput[rot=0,labelsep=0]{50}{2}{$\max(v)$}
+  \nput[rot=40]{60}{3}{$\min(v)$}
+  % 
+  \psset{linecolor=black!70}
+  \psset{linestyle=dashed}
+  % 
+  \ncline{->}{0}{1}
+  \ncline{->}{1}{2}
+  \ncline{->}{2}{3}
+  \ncline{->}{3}{4}
+  \ncline{->}{4}{5}
+  \ncline{->}{5}{6}
+  %
+  \psset{arcangle=30}
+  \ncarc[arcangle=40]{->}{0}{6}
+  \ncarc{->}{0}{2}
+  \ncarc[arcangle=40]{->}{3}{6}
+  \ncarc{->}{3}{5}
+  % 
+  \psset{linecolor=black}
+  \psset{linestyle=solid}
+  \cnodeput(5,-1.5){v}{$v$}
+  %
+  \ncline{->}{0}{v}
+  \ncline{->}{2}{v}
+  \ncline{->}{v}{3}
+  \ncline{->}{v}{4}
+  \ncline{->}{v}{6}
+}
+%
+\rput(0.5,-5.0){
+%
+  % 
+  \cnodeput(0,0){0}{0}
+  \cnodeput(2,0){1}{1}
+  \cnodeput[fillcolor=black!25,fillstyle=solid](4,0){2}{2}
+  \cnodeput[fillcolor=black!25,fillstyle=solid](6,0){3}{3}
+  \cnodeput(8,0){4}{4}
+  \cnodeput(10,0){5}{5}
+  \cnodeput(12,0){6}{6}
+  \nput[rot=0,labelsep=0]{50}{2}{$\min(v)$}
+  \nput[rot=0,labelsep=0]{-60}{4}{$\max(v)$}
+  % 
+  \psset{linecolor=black!70}
+  \psset{linestyle=dashed}
+  % 
+  \ncline{->}{0}{1}
+  \ncline{->}{1}{2}
+  \ncline{->}{2}{3}
+  \ncline{->}{3}{4}
+  \ncline{->}{4}{5}
+  \ncline{->}{5}{6}
+  %
+  \psset{arcangle=30}
+  \ncarc[arcangle=40]{->}{0}{6}
+  \ncarc{->}{0}{2}
+  \ncarc[arcangle=40]{->}{3}{6}
+  \ncarc{->}{3}{5}
+  % 
+  \psset{linecolor=black}
+  \psset{linestyle=solid}
+  \cnodeput(5,-1.5){v}{$v$}
+  %
+  \ncline{->}{0}{v}
+  \ncline{->}{v}{2}
+  \ncline{->}{v}{3}
+  \ncline{->}{4}{v}
+  \ncline{->}{v}{6}
+}
+%
+\rput(0.5,-10.0){
+%
+  % 
+  \cnodeput(0,0){0}{0}
+  \cnodeput(2,0){1}{1}
+  \cnodeput[fillcolor=black!25,fillstyle=solid](4,0){2}{2}
+  \cnodeput[fillcolor=black!25,fillstyle=solid](6,0){3}{3}
+  \cnodeput(8,0){4}{4}
+  \cnodeput(10,0){5}{5}
+  \cnodeput(12,0){6}{6}
+  \nput[rot=0,labelsep=0]{50}{2}{$\min(v)$}
+  \nput[rot=0,labelsep=0]{-60}{4}{$\max(v)$}
+  % 
+  \psset{linecolor=black!70}
+  \psset{linestyle=dashed}
+  % 
+  \ncline{->}{0}{1}
+  \ncline{->}{1}{2}
+  \ncline{->}{2}{3}
+%  \ncline{->}{3}{4}
+  \ncline{->}{4}{5}
+  \ncline{->}{5}{6}
+  %
+  \psset{arcangle=30}
+  \ncarc[arcangle=40]{->}{0}{6}
+  \ncarc{->}{0}{2}
+  \ncarc[arcangle=40]{->}{3}{6}
+  \ncarc{->}{3}{5}
+  % 
+  \psset{linecolor=black}
+  \psset{linestyle=solid}
+  \cnodeput(5,-1.5){v}{$v$}
+  %
+  \ncline{->}{0}{v}
+  \ncline{->}{v}{2}
+  \ncline{->}{v}{3}
+  \ncline{->}{4}{v}
+  \ncline{->}{v}{6}
+}
+
+%
+\end{pspicture}
+
+
+\end{document}

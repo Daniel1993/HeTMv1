@@ -1,0 +1,4 @@
+# define first HTM_ALG_DIR
+HTM_ALG_SRCS := \
+    $(HTM_ALG_DIR)/include/htm_retry_template.h \
+    $(HTM_ALG_DIR)/src/htm.cpp 

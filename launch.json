@@ -1,0 +1,12 @@
+{
+	"type": "gdb",
+	"request": "launch",
+	"target": "./code/hetm/unit_tests/Runner",
+	"cwd": "${workspaceRoot}",
+	"ssh": {
+		"host": "pascalio.dynu.net",
+		"cwd": "/home/dcastro/projs/HeTM_V1/code/hetm/unit_tests",
+		"keyfile": "C:\\Users\\Daniel Castro\\.ssh\\id_rsa_daniel",
+		"user": "dcastro"
+	}
+}

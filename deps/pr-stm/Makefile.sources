@@ -1,0 +1,8 @@
+DEPS_PR_STM_SRCS  := \
+	$(DEPS_PR_STM_DIR)/src/aux.cu \
+	$(DEPS_PR_STM_DIR)/src/pr-stm-internal.cu \
+	$(DEPS_PR_STM_DIR)/src/pr-stm-internal.cuh \
+	$(DEPS_PR_STM_DIR)/include/pr-stm.cuh
+
+DEPS_PR_STM_OBJS := \
+    $(DEPS_PR_STM_DIR)/pr-stm-obj.o

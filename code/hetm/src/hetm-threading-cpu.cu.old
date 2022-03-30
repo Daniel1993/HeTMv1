@@ -1,0 +1,794 @@
+#include "hetm-log.h"
+#include "hetm.cuh"
+#include "stm-wrapper.h"
+#include "stm.h" // depends on STM
+#include "knlman.hpp"
+#include "hetm-cmp-kernels.cuh"
+// #include ".h" // depends on STM
+
+#include <list>
+#include <mutex>
+
+#define NVTX_PROF_BLOCK   0
+#define NVTX_PROF_BACKOFF 1
+
+#define EARLY_CHECK_NB_ENTRIES 8192
+
+static std::list<HeTM_callback> beforeCPU, afterCPU;
+std::mutex HeTM_statsMutex; // extern in hetm-threading-gpu
+
+#define MAXIMUM_THREADS 1024
+
+// TODO: still too many memcpyies
+
+static int consecutiveFlagCpy = 0; // avoid consecutive copies
+
+thread_local static int inBackoff[HETM_NB_DEVICES];
+thread_local static int nbCpyRounds[HETM_NB_DEVICES];
+thread_local static int doneWithCPUlog[HETM_NB_DEVICES];
+thread_local static int awakeGPU[HETM_NB_DEVICES];
+
+static int launchCmpKernel(HeTM_thread_s*, size_t wsetSize, int devId);
+static int launchApplyKernel(HeTM_thread_s *threadData, size_t wsetSize);
+static void cmpSyncApply();
+static void wakeUpGPU(int devId);
+static void asyncCpy(void *cpuTidInt);
+static void asyncCmp(void *cpuTidInt);
+static void asyncApply(void *argsPtr);
+
+static void asyncGetInterConflFlag(void*);
+
+int HeTM_before_cpu_start(HeTM_callback req)
+{
+  beforeCPU.push_back(req);
+  return 0;
+}
+  
+int HeTM_after_cpu_finish(HeTM_callback req)
+{
+  afterCPU.push_back(req);
+  return 0;
+}
+
+void runBeforeCPU(int id, void *data)
+{
+  for (int i = 0; i < HETM_NB_DEVICES; ++i) {
+    awakeGPU[i] = 0;
+  }
+  for (auto it = beforeCPU.begin(); it != beforeCPU.end(); ++it) {
+    HeTM_callback clbk = *it;
+    clbk(id, data);
+  }
+}
+
+void runAfterCPU(int id, void *data)
+{
+  for (auto it = afterCPU.begin(); it != afterCPU.end(); ++it) {
+    HeTM_callback clbk = *it;
+    clbk(id, data);
+  }
+}
+
+
+static void asyncCpy(void *argsPtr)
+{
+  int threadId = (int)((uintptr_t)argsPtr);
+  // truncated = stm_log_truncate(threadData->wSetLog, &nbChunks);
+  // TODO: there is only one log per CPU thread (not per GPU)
+  int j = 0; // putting all the info in GPU0
+  HeTM_thread_s *threadData = &(HeTM_shared_data[j].threadsInfo[threadId]);
+  auto wSetLog = HeTM_shared_data[j].threadsInfo[threadId].wSetLog;
+  consecutiveFlagCpy = 0; // allow to cpy the flag
+  size_t moreLog;
+
+  if (wSetLog->first == NULL) {
+    __atomic_store_n(&(threadData->isCpyDone), 1, __ATOMIC_RELEASE);
+    CHUNKED_LOG_DESTROY(j, wSetLog);
+  }
+
+  // ----
+  int nbChunks;
+  CHUNKED_LOG_TRUNCATE(j, wSetLog, STM_LOG_BUFFER_SIZE, &nbChunks);
+  threadData->targetCopyNb += nbChunks;
+  // ----
+
+  for (int i = 0; i < HETM_NB_DEVICES; ++i) {
+    // TODO: check the statistics in threadData, cpy is updated only on GPU0
+    threadData = &(HeTM_shared_data[i].threadsInfo[threadId]);
+    HeTM_wset_log_cpy_to_gpu(threadData, CHUNKED_LOG_CURR_TRUNC(i, wSetLog) , &moreLog);
+    threadData->curWSetSize += moreLog;
+    HETM_DEB_THRD_CPU("[%i] Buffered WSet of size %zu", threadData->id, threadData->curWSetSize);
+  }
+  CHUNKED_LOG_DESTROY_TRUNC(j, wSetLog);
+  // unsigned nbChunksSent = threadData->curWSetSize / LOG_SIZE;
+}
+
+static void asyncCmp(void *argsPtr)
+{
+  int threadId = (int)((uintptr_t)argsPtr);
+  consecutiveFlagCpy = 0; // allow to cpy the flag
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+    HeTM_thread_s *threadData = &(HeTM_shared_data[j].threadsInfo[threadId]);
+    launchCmpKernel(threadData, threadData->curWSetSize, j);
+    threadData->curWSetSize = 0; // reset this counter
+  }
+}
+
+static void asyncApply(void *argsPtr)
+{
+  int threadId = (int)((uintptr_t)argsPtr);
+  consecutiveFlagCpy = 0; // allow to cpy the flag
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+    HeTM_thread_s *threadData = &(HeTM_shared_data[j].threadsInfo[threadId]);
+    launchApplyKernel(threadData, threadData->curWSetSize);
+    threadData->curWSetSize = 0; // reset this counter
+  }
+}
+
+static void enterBackoffFn(int devId)
+{
+  if (!inBackoff[devId]) {
+    if (devId == 0) { NVTX_PUSH_RANGE("backoff_mode", NVTX_PROF_BACKOFF); }
+    inBackoff[devId] = 1;
+  }
+  HeTM_thread_data[devId]->statusCMP = HETM_CPY_ASYNC;
+  HeTM_thread_data[devId]->isCpyDone = 0;
+  // CHUNKED_LOG_EXTEND_FORCE(HeTM_thread_data->wSetLog);
+  __sync_synchronize(); // sync the log
+
+  if (HeTM_thread_data[devId]->curCopyNb > HeTM_thread_data[devId]->targetCopyNb) {
+    // TODO: this is a bug
+    HeTM_thread_data[devId]->targetCopyNb = HeTM_thread_data[devId]->curCopyNb;
+    HeTM_thread_data[devId]->isCpyDone = 1;
+    HeTM_thread_data[devId]->isCopying = 0;
+    return;
+  }
+
+  if (HeTM_thread_data[devId]->targetCopyNb >= STM_LOG_BUFFER_SIZE) {
+    // Done during the execution phase, move to comparisons
+    if (!HeTM_thread_data[devId]->isCopying) {
+      HeTM_thread_data[devId]->isCpyDone = 1;
+    }
+    return;
+  }
+
+  HeTM_thread_data[devId]->isCopying = 1;
+  // printf("Thread %i async cpy target = %i \n",
+  //   HeTM_thread_data->id, HeTM_thread_data->targetCopyNb);
+  
+  RUN_ASYNC(asyncCpy, ((uintptr_t)HeTM_thread_data[0]->id));
+}
+
+void pollIsRoundComplete(int nonBlock)
+{
+  HETM_GPU_STATE GPU_STATUS[HETM_NB_DEVICES];
+  int anyDoneOrIdle = 0;
+
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) { 
+    GPU_STATUS[j] = __atomic_load_n(&(HeTM_get_GPU_status(j)), __ATOMIC_ACQUIRE);
+    if (GPU_STATUS[j] == HETM_BATCH_DONE || GPU_STATUS[j] == HETM_GPU_IDLE) anyDoneOrIdle = 1;
+  }
+
+  // HETM_DEB_THRD_CPU("Thread %i enters cpy ws to all GPUs", HeTM_thread_data[0]->id);
+  // did the GPU finished the batch? HeTM_get_GPU_status() is a MACRO
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+    // HETM_DEB_THRD_CPU("Thread %i in cpyWSetToGPU check status GPU%i = %i",
+    //     HeTM_thread_data[j]->id, j, HeTM_get_GPU_status(j));
+    
+    // if (anyDoneOrIdle && (GPU_STATUS[j] == HETM_BATCH_RUN)
+    //     && !HeTM_thread_data[j]->isCopying) {
+    //   __sync_add_and_fetch(&HeTM_shared_data[j].threadsWaitingSync, 1);
+    //   HETM_DEB_THRD_CPU(" <<< thread %i cmpSyncApply GPU %i (pass batch BUT anyDoneOrIdle)",
+    //     HeTM_thread_data[j]->id, j);
+    //   continue;
+    // }
+
+    if (!anyDoneOrIdle && ((GPU_STATUS[j] != HETM_BATCH_DONE
+        && GPU_STATUS[j] != HETM_GPU_IDLE)
+        || HeTM_thread_data[j]->isCopying)) {
+      // HETM_DEB_THRD_CPU(" <<< thread %i cmpSyncApply GPU %i (pass batch)",
+        // HeTM_thread_data[j]->id, j);
+      continue;
+    }
+
+    if ((anyDoneOrIdle && (GPU_STATUS[j] == HETM_BATCH_RUN)
+        && !HeTM_thread_data[j]->isCopying)
+        || GPU_STATUS[j] != HETM_IS_EXIT) {
+      TIMER_READ(HeTM_thread_data[j]->backoffBegTimer);
+      __sync_add_and_fetch(&HeTM_shared_data[j].threadsWaitingSync, 1);
+      if (j == 0) {
+        cmpSyncApply();
+        HETM_DEB_THRD_CPU(" <<< thread %i cmpSyncApply GPU %i (thrs waiting sync = %li)",
+          HeTM_thread_data[j]->id, j, HeTM_shared_data[j].threadsWaitingSync);
+      }
+      if (!nonBlock)
+        wakeUpGPU(j); // already decreases HeTM_shared_data.threadsWaitingSync
+      continue; // return;
+    }
+    // doneWithCPUlog=1;
+
+    // TODO: HeTM_thread_data->isCpyDone != HeTM_thread_data->targetCopyNb
+    // HETM_DEB_THRD_CPU("Thread %i in cpyWSetToGPU (status GPU%i = %i)",
+    //     HeTM_thread_data[j]->id, j, HeTM_get_GPU_status(j));
+
+    if (GPU_STATUS[j] == HETM_GPU_IDLE) {
+      HETM_DEB_THRD_CPU("Thread %i found GPU %i IDLE (try send log chunks)", HeTM_thread_data[j]->id, j);
+      // The GPU is IDLE, lets push some writes into the GPU right away
+      // continue in case there isn't enough log
+      nbCpyRounds[j] = HeTM_thread_data[j]->wSetLog->size / STM_LOG_BUFFER_SIZE + 1;
+      if (nbCpyRounds[j] < 1 || !HeTM_thread_data[j]->isCpyDone
+        || !HeTM_thread_data[j]->isCmpDone) {
+          HETM_DEB_THRD_CPU("Thread %i cannot send more log chunks to GPU %i", HeTM_thread_data[j]->id, j);
+          continue; // return;
+        }
+    }
+
+    if (!inBackoff[j]) {
+      // HETM_DEB_THRD_CPU("Thread %i not in backoff (GPU %i)", HeTM_thread_data[j]->id, j);
+      nbCpyRounds[j] = HeTM_thread_data[j]->wSetLog->size / STM_LOG_BUFFER_SIZE + 1;
+      TIMER_READ(HeTM_thread_data[j]->backoffBegTimer);
+    }
+
+    if ((j == 0 && !HeTM_thread_data[j]->isCpyDone
+        && HeTM_thread_data[j]->statusCMP == HETM_CPY_ASYNC)
+        || (j > 0 && !HeTM_thread_data[j-1]->isCpyDone
+        && HeTM_thread_data[j-1]->statusCMP == HETM_CPY_ASYNC)) {
+      // HETM_DEB_THRD_CPU("Thread %i cpy not ready (GPU %i, still copying)", HeTM_thread_data[j]->id, j);
+      continue; // return; // cpy not ready yet
+    }
+    if ((j == 0 && !HeTM_thread_data[j]->isCmpDone
+        && HeTM_thread_data[j]->statusCMP == HETM_CMP_ASYNC)
+        || (j > 0 && !HeTM_thread_data[j-1]->isCpyDone
+        && HeTM_thread_data[j-1]->statusCMP == HETM_CPY_ASYNC)) {
+      // HETM_DEB_THRD_CPU("Thread %i cpy not ready (GPU %i, still comparing)", HeTM_thread_data[j]->id, j);
+      continue; // return; // cmp not ready yet
+    }
+
+    if (HeTM_thread_data[j]->isCpyDone
+        && HeTM_thread_data[j]->statusCMP == HETM_CPY_ASYNC) {
+      HETM_DEB_THRD_CPU("Thread %i ready to start comparing (GPU %i)", HeTM_thread_data[j]->id, j);
+      // TODO: add more copies!
+      HeTM_thread_data[j]->statusCMP = HETM_CMP_ASYNC;
+      HeTM_thread_data[j]->isCmpDone = 0;
+      HeTM_thread_data[j]->isCmpVoid = 0;
+      HeTM_thread_data[j]->targetCopyNb = 0;
+      HeTM_thread_data[j]->curCopyNb = 0;
+
+      RUN_ASYNC(asyncCmp, ((uintptr_t)HeTM_thread_data[0]->id));
+
+      // FREEs the log used in the transfers
+      while (HeTM_thread_data[j]->targetCopyNb > HeTM_thread_data[j]->curCopyNb) {
+        asm volatile("lfence" ::: "memory");
+      }
+      // BUG: HeTM_thread_data->targetCopyNb < HeTM_thread_data->curCopyNb
+      // if (HeTM_thread_data[j]->wSetLog->first != NULL && j == HETM_NB_DEVICES-1) {
+      //   HETM_DEB_THRD_CPU("Thread %i destroys logs (GPU %i)", HeTM_thread_data[j]->id, j);
+      //   CHUNKED_LOG_DESTROY(j, HeTM_thread_data[j]->wSetLog);
+      // }
+
+      // __sync_synchronize();
+      continue; // return;
+    }
+
+    if (HeTM_thread_data[j]->isCmpDone && HeTM_thread_data[j]->statusCMP == HETM_CMP_ASYNC) { // cmp completed
+      HeTM_thread_data[j]->statusCMP = HETM_DONE_ASYNC;
+      HETM_DEB_THRD_CPU("Thread %i done comparing write-set with GPU %i", HeTM_thread_data[j]->id, j);
+      continue; // return;
+    }
+
+    __sync_synchronize();
+
+    if (HeTM_shared_data[j].threadsWaitingSync == HeTM_gshared_data.nbCPUThreads && doneWithCPUlog[j]) {
+      // can only enter here if no cpy or cmp is running
+      /* stop sending comparison kernels to the GPU */
+      if (j == 0) {
+        cmpSyncApply();
+      }
+      if (!awakeGPU[j]) {
+        HETM_DEB_THRD_CPU("Thread %i is doneWithCPUlog (GPU %i) starting blocking merge phase",
+          HeTM_thread_data[j]->id, j);
+        wakeUpGPU(j);
+        awakeGPU[j] = 1;
+      }
+    } else if (HeTM_thread_data[j]->nbCmpLaunches <= nbCpyRounds[j]) {
+      // --------------------------------------
+      // continue running the CPU
+      HETM_DEB_THRD_CPU("Thread %i enters non-blocking merge phase (GPU %i)", HeTM_thread_data[j]->id, j);
+      enterBackoffFn(j);
+      // --------------------------------------
+    } else if ((!doneWithCPUlog[j] && j == 0) || (!doneWithCPUlog[j] && doneWithCPUlog[j-1])) {
+      // threads must increment [j].threadsWaitingSync in the correct order
+      doneWithCPUlog[j] = 1;
+      __sync_add_and_fetch(&HeTM_shared_data[j].threadsWaitingSync, 1);
+      HETM_DEB_THRD_CPU(" <<< thread %i waits sync GPU %i (thrs waiting sync = %li)",
+        HeTM_thread_data[j]->id, j, HeTM_shared_data[j].threadsWaitingSync);
+      HeTM_thread_data[j]->statusCMP = HETM_CMP_BLOCK;
+    }
+    HeTM_thread_data[j]->nbCmpLaunches++;
+  }
+}
+
+void resetInterGPUConflFlag() 
+{
+  if (HeTM_thread_data[0]->id == 0) {
+    for (int j = 0; j < HETM_NB_DEVICES; j++) {
+      // HETM_DEB_THRD_CPU("\033[0;32m" "Thread 0 reset inter confl detect GPU %i flag" "\033[0m", j);
+      __atomic_store_n(&(HeTM_shared_data[j].isInterGPUConflDone), 0, __ATOMIC_RELEASE);
+    }
+  }
+}
+
+static void syncGatherCpyStatistics(int threadId) 
+{
+  // reset some time counters
+  // TODO: BUG: in the batches that follow the 1st
+  //   one there is something blocking the GPU
+#ifdef USE_NVTX
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+    memman_select_device(j);
+    auto threadData = &(HeTM_shared_data[j].threadsInfo[threadId]);
+    if (*hetm_batchCount[j] == 1) {
+      int nbCopies = threadData->logChunkEventCounter - threadData->logChunkEventStore;
+      for (int i = 0; i < nbCopies; ++i) {
+        int eventIdx = (i+threadData->logChunkEventStore) % STM_LOG_BUFFER_SIZE;
+        float timeTaken;
+        CUDA_EVENT_SYNCHRONIZE(threadData->cpyLogChunkStartEvent[eventIdx]);
+        CUDA_EVENT_SYNCHRONIZE(threadData->cpyLogChunkStopEvent[eventIdx]);
+        CUDA_EVENT_ELAPSED_TIME(&timeTaken, threadData->cpyLogChunkStartEvent[eventIdx],
+          threadData->cpyLogChunkStopEvent[eventIdx]);
+        threadData->timeLogs = timeTaken;
+        threadData->timeCpy = threadData->timeLogs;
+        threadData->timeCpySum += threadData->timeCpy;
+      }
+      threadData->logChunkEventStore = threadData->logChunkEventCounter;
+    }
+  }
+#endif
+  // printf("Thread %i finished\n", HeTM_thread_data->id);
+}
+
+static void compareCPUrsAgainstAllGPUws()
+{
+  unsigned char *GPUwsPtr, *CPUrsPtr = (unsigned char *)HeTM_shared_data[0].bmap_rset_CPU_hostptr;
+  unsigned char batch = (unsigned char) HeTM_gshared_data.batchCount;
+  unsigned char *matCPU = (unsigned char *)HeTM_gshared_data.mat_confl_CPU_unif;
+  int myId = HeTM_thread_data[0]->id;
+  int nbThreads = HeTM_gshared_data.nbCPUThreads;
+  long nbGranules = HeTM_gshared_data.sizeMemPool / PR_LOCK_GRANULARITY;
+  long sliceSize = nbGranules / nbThreads;
+  long minRange = myId*sliceSize, maxRange = (myId+1)*sliceSize;
+
+  // get each GPU ws
+  memman_select("HeTM_gpu_wset");
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+    int CPUid = HETM_NB_DEVICES;
+    // int coord_c = (HETM_NB_DEVICES+1)*j + CPUid; // last column
+    int coord_l = (HETM_NB_DEVICES+1)*CPUid + j; // last row
+    memman_select_device(j);
+    GPUwsPtr = (unsigned char*)memman_get_cpu(NULL);
+    
+    for (long g = minRange; g < maxRange; ++g) {
+      if (CPUrsPtr[g] == batch && GPUwsPtr[g] == batch) {
+        // conflict detected, mark on matrix
+        matCPU[coord_l] = 1;
+        break;
+      }
+    }
+  }
+  //
+}
+
+static void cmpSyncApply()
+{
+  int devId = 0;
+  memman_select_device(devId);
+  size_t curNodeSize = HeTM_thread_data[devId]->wSetLog->size;
+
+  // HETM_DEB_THRD_CPU("Thread %i blocks and sends the logs to GPU %i", HeTM_thread_data[devId]->id, devId);
+
+  HeTM_thread_data[devId]->doHardLogCpy = 1; // copy all the chunks (even if incomplete)
+
+  // Should only be called if CMP_ASYNC before
+  RUN_ASYNC(asyncGetInterConflFlag, NULL);
+
+//   HETM_DEB_THRD_CPU("Thread %i reachead CMP threshold WSetSize=%zu(x64k)",
+//     HeTM_thread_data->id, curNodeSize);
+//   if (CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)) {
+//     HeTM_thread_data->isCmpDone = 1;
+//     __sync_synchronize();
+//   }
+  if (inBackoff[devId]) {
+    // printf("[%i] exit backoff\n", HeTM_thread_data->id);
+    NVTX_POP_RANGE();
+    inBackoff[devId] = 0;
+  }
+  NVTX_PUSH_RANGE("blocked", NVTX_PROF_BLOCK);
+  TIMER_READ(HeTM_thread_data[devId]->backoffEndTimer);
+  HeTM_thread_data[devId]->timeBackoff += TIMER_DIFF_SECONDS(
+    HeTM_thread_data[devId]->backoffBegTimer, HeTM_thread_data[devId]->backoffEndTimer
+  );
+
+  if (curNodeSize > 0 && !(HeTM_is_interconflict(devId))) {
+    HETM_DEB_THRD_CPU("Thread %i blocks and sends the logs to GPU %i", HeTM_thread_data[devId]->id, devId);
+    // must block
+    do {
+
+      for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+        HeTM_thread_data[j]->isCpyDone = 0;
+        HeTM_thread_data[j]->isCmpDone = 0;
+        HeTM_thread_data[j]->isCmpVoid = 0;
+      }
+      // __sync_synchronize();
+// #if HETM_LOG_TYPE == HETM_VERS_LOG
+//       if (HeTM_thread_data->wSetLog->first->p.pos == 0) break;
+// #endif
+
+      __sync_synchronize(); // sync the log
+
+      for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+        while (HeTM_thread_data[j]->isCopying) {
+          asm volatile("lfence" ::: "memory");
+        }
+        HeTM_thread_data[j]->isCopying = 1;
+      }
+
+      RUN_ASYNC(asyncCpy, ((uintptr_t)HeTM_thread_data[0]->id));
+
+      COMPILER_FENCE();
+      for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+        while (!__atomic_load_n(&(HeTM_thread_data[j]->isCpyDone), __ATOMIC_ACQUIRE) && 
+            !__atomic_load_n(&(HeTM_is_stop(0)), __ATOMIC_ACQUIRE)) {
+          asm volatile("lfence" ::: "memory");
+        }
+      }
+
+      // if (HeTM_thread_data[devId]->wSetLog->first != NULL) {
+      //   CHUNKED_LOG_DESTROY(devId, HeTM_thread_data[devId]->wSetLog); // same log for all devices
+      // }
+
+      RUN_ASYNC(asyncCmp, ((uintptr_t)HeTM_thread_data[0]->id));
+
+      COMPILER_FENCE();
+      for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+        // BIG TODO: change this to WAIT macro and add the EXIT condition there
+        while (!HeTM_thread_data[j]->isCmpDone && 
+            !__atomic_load_n(&(HeTM_is_stop(0)), __ATOMIC_ACQUIRE)) {
+          asm volatile("lfence" ::: "memory");
+        }
+      }
+
+      for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+        HeTM_thread_data[j]->curCopyNb = 0;
+        HeTM_thread_data[j]->targetCopyNb = 0;
+        HeTM_thread_data[j]->isCopying = 0;
+      }
+
+      RUN_ASYNC(asyncGetInterConflFlag, NULL);
+
+      // each CPU does a little bit
+      compareCPUrsAgainstAllGPUws();
+
+      for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+        HETM_DEB_THRD_CPU("\033[0;31m" "Thread %i waits interconflict detection by GPU %i" "\033[0m",
+          HeTM_thread_data[devId]->id, j);
+        while (!__atomic_load_n(&(HeTM_shared_data[j].isInterGPUConflDone), __ATOMIC_ACQUIRE) && 
+            !__atomic_load_n(&(HeTM_is_stop(0)), __ATOMIC_ACQUIRE)) {
+          asm volatile("lfence" ::: "memory");
+        }
+      }
+
+      if (HeTM_is_interconflict(devId)) break;
+
+      // apply the contents if there is no conflicts in the GPU side
+      // see offloadSyncDatasetAfterBatch
+
+      // --------------------------------------------------------------------
+      // bogus, we recycle the cmpStartEvent and cmpStopEvent. it may happen
+      // that a new kernel was already submitted, which overwrites the 
+      // previous recordings...
+      // moved elsewhere...
+      // if (!HeTM_thread_data[devId]->isCmpVoid) {
+      //   CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data[devId]->cmpStartEvent);
+      //   CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data[devId]->cmpStopEvent);
+      //   CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data[devId]->timeCmp, HeTM_thread_data[devId]->cmpStartEvent,
+      //     HeTM_thread_data[devId]->cmpStopEvent);
+      //   if (HeTM_thread_data[devId]->timeCmp > 0) { // TODO: bug here
+      //     HeTM_thread_data[devId]->timeCmpSum += HeTM_thread_data[devId]->timeCmp;
+      //   }
+      // }
+      // --------------------------------------------------------------------
+      
+    } /* while not empty */ while(HeTM_thread_data[devId]->wSetLog->nextTruncated[devId] != NULL);
+
+    HeTM_thread_data[devId]->wSetLog->first = HeTM_thread_data[devId]->wSetLog->last
+      = HeTM_thread_data[devId]->wSetLog->curr = NULL;
+  } else {
+    /* no inter-conflict */
+    if (HeTM_thread_data[devId]->wSetLog->first != NULL) {
+      HETM_DEB_THRD_CPU("Thread %i blocks waits cpy to GPU %i", HeTM_thread_data[devId]->id, devId);
+      while (!HeTM_thread_data[devId]->isCpyDone && 
+          !__atomic_load_n(&(HeTM_is_stop(0)), __ATOMIC_ACQUIRE)) {
+        asm volatile("lfence" ::: "memory");
+      }
+    }
+  }
+
+  // if (HeTM_thread_data[devId]->wSetLog->first != NULL) { 
+  //   CHUNKED_LOG_DESTROY(devId, HeTM_thread_data[devId]->wSetLog); 
+  // } // frees and start new round
+
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+    HeTM_thread_data[j]->doHardLogCpy = 0; // reset
+    HeTM_thread_data[j]->curCopyNb = 0;
+    HeTM_thread_data[j]->targetCopyNb = 0;
+    HeTM_thread_data[j]->isCopying = 0;
+  }
+
+  // TODO: boggus copy profile data disabled
+  // syncGatherCpyStatistics(HeTM_thread_data[0]->id);
+}
+
+void syncCPUReleaseLogs() // this must be called by the GPU
+{
+  for (int cpuTid = 0; cpuTid < HeTM_gshared_data.nbCPUThreads; ++cpuTid) {
+    if (HeTM_shared_data[0].threadsInfo[cpuTid].wSetLog->first != NULL) { 
+      CHUNKED_LOG_DESTROY(0, HeTM_shared_data[0].threadsInfo[cpuTid].wSetLog); 
+    } 
+  }
+}
+
+void syncCPUApplyOnGPUs(int nbGPUs, int *GPUIds) // this must be called by the GPU
+{
+  for (int cpuTid = 0; cpuTid < HeTM_gshared_data.nbCPUThreads; ++cpuTid) {
+
+    size_t curNodeSize = HeTM_shared_data[0].threadsInfo[cpuTid].wSetLog->size;
+
+    if (curNodeSize > 0) {
+      do {
+        for (int j = 0; j < nbGPUs; ++j) {
+          int GPUId = GPUIds[j];
+          auto threadData = &(HeTM_shared_data[GPUId].threadsInfo[cpuTid]);
+          threadData->isCpyDone = 0;
+          threadData->isCmpDone = 0;
+          threadData->isCmpVoid = 0;
+        }
+        __sync_synchronize(); // sync the log
+        for (int j = 0; j < nbGPUs; ++j) {
+          int GPUId = GPUIds[j];
+          auto threadData = &(HeTM_shared_data[GPUId].threadsInfo[cpuTid]);
+          while (threadData->isCopying) { asm volatile("lfence" ::: "memory"); }
+          threadData->isCopying = 1;
+        }
+
+        RUN_ASYNC(asyncCpy, ((uintptr_t)cpuTid));
+
+        COMPILER_FENCE();
+        for (int j = 0; j < nbGPUs; ++j) {
+          int GPUId = GPUIds[j];
+          auto threadData = &(HeTM_shared_data[GPUId].threadsInfo[cpuTid]);
+          while (!threadData->isCpyDone) { asm volatile("lfence" ::: "memory"); }
+        }
+
+        RUN_ASYNC(asyncApply, ((uintptr_t)cpuTid));
+
+        COMPILER_FENCE();
+        for (int j = 0; j < nbGPUs; ++j) {
+          int GPUId = GPUIds[j];
+          auto threadData = &(HeTM_shared_data[GPUId].threadsInfo[cpuTid]);
+          while (!threadData->isApplyDone) { asm volatile("lfence" ::: "memory"); }
+        }
+
+        for (int j = 0; j < nbGPUs; ++j) {
+          int GPUId = GPUIds[j];
+          auto threadData = &(HeTM_shared_data[GPUId].threadsInfo[cpuTid]);
+          threadData->curCopyNb = 0;
+          threadData->targetCopyNb = 0;
+          threadData->isCopying = 0;
+        }
+      } /* while not empty */ while(HeTM_thread_data[0]->wSetLog->nextTruncated[0] != NULL);
+
+      HeTM_shared_data[0].threadsInfo[cpuTid].wSetLog->first 
+        = HeTM_shared_data[0].threadsInfo[cpuTid].wSetLog->last
+        = HeTM_shared_data[0].threadsInfo[cpuTid].wSetLog->curr 
+        = NULL;
+    }
+
+    for (int j = 0; j < nbGPUs; ++j) {
+      int GPUId = GPUIds[j];
+      auto threadData = &(HeTM_shared_data[GPUId].threadsInfo[cpuTid]);
+      threadData->doHardLogCpy = 0; // reset
+      threadData->curCopyNb = 0;
+      threadData->targetCopyNb = 0;
+      threadData->isCopying = 0;
+    }
+
+    // reset some time counters
+    // TODO: BUG: in the batches that follow the 1st
+    //   one there is something blocking the GPU
+    syncGatherCpyStatistics(cpuTid);
+  }
+}
+
+static void wakeUpGPU(int devId)
+{
+  HETM_DEB_THRD_CPU("thread %i wakes GPU %i\n", HeTM_thread_data[devId]->id, devId);
+  HeTM_sync_barrier(devId); 
+
+  if (devId < HETM_NB_DEVICES-1) {
+    NVTX_POP_RANGE();
+    return;
+  } else {
+    HETM_DEB_THRD_CPU("{BLOCK_WAIT_NEXT_BATCH} thread %i waits final GPU %i\n", 
+      HeTM_thread_data[devId]->id, devId);
+    HeTM_sync_barrier(devId); // /* wait to set the cuda_stop flag to 0 */
+  }
+
+  // int j = devId;
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+
+
+
+    // if (!HeTM_thread_data[devId]->isCmpVoid) {
+    //   CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data[devId]->cmpStartEvent);
+    //   CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data[devId]->cmpStopEvent);
+    //   CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data[devId]->timeCmp, HeTM_thread_data[devId]->cmpStartEvent,
+    //     HeTM_thread_data[devId]->cmpStopEvent);
+    //   if (HeTM_thread_data[devId]->timeCmp > 0) { // TODO: bug here
+    //     HeTM_thread_data[devId]->timeCmpSum += HeTM_thread_data[devId]->timeCmp;
+    //   }
+    // }
+
+
+
+    doneWithCPUlog[j] = 0;
+    TIMER_READ(HeTM_thread_data[j]->blockingEndTimer);
+    double timeBlocked = TIMER_DIFF_SECONDS(
+      HeTM_thread_data[j]->backoffEndTimer, HeTM_thread_data[devId]->blockingEndTimer
+    );
+    if (timeBlocked > 0) HeTM_thread_data[j]->timeBlocked += timeBlocked;
+    // else there is a bug
+    // printf("[%i] exit blocked\n", HeTM_thread_data->id);
+    HeTM_thread_data[j]->statusCMP = HETM_CMP_OFF;
+    HeTM_thread_data[j]->nbCmpLaunches = 0;
+    __sync_add_and_fetch(&HeTM_shared_data[j].threadsWaitingSync, -1);
+
+    // HETM_DEB_THRD_CPU(" >>> thread %i waits final GPU %i to finalize (threadsWaitingSync=%li)\n",
+    //   HeTM_thread_data[devId]->id, devId, HeTM_shared_data[j].threadsWaitingSync);
+  }
+}
+
+static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize, int j)
+{
+  // TODO: add early validation kernel
+  // if (!doApply) { return 0; }
+
+  // for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+  // int j = threadData->devId;
+  memman_select_device(j);
+
+  HeTM_CPULogEntry *vecDev;
+  size_t sizeBuffer = STM_LOG_BUFFER_SIZE * LOG_SIZE;
+  int tid = threadData->id;
+
+  vecDev = (HeTM_CPULogEntry*)HeTM_shared_data[j].bmap_wset_CPU_hostptr;
+  vecDev += tid*sizeBuffer; // each thread has a bit of the buffer
+
+  // -----------------------------------------------
+  //Calc number of blocks
+  int nbThreadsX = 256;
+  int bo = (wsetSize + nbThreadsX-1) / (nbThreadsX);
+  if (bo < 1) bo = 1;
+
+  // Memory region of the entry object
+  // printf("dev = %i batchCount = %li\n", j, HeTM_gshared_data.batchCount);
+  HeTM_cmp_s checkTxCompressed_args = {
+    .knlArgs = {
+      .devId = j,
+      .otherDevId = -1,
+      .nbOfGPUs = HETM_NB_DEVICES,
+      .sizeWSet = (int)wsetSize,
+      .sizeRSet = (int)HeTM_shared_data[j].rsetLogSize,
+      .idCPUThr = (int)threadData->id,
+      .batchCount = (unsigned char)HeTM_gshared_data.batchCount
+    },
+    .clbkArgs = threadData
+  };
+
+  dim3 blocksCheck(bo); // partition the stm_log by the different blocks
+  dim3 threadsPerBlock(nbThreadsX); // each block has nbThreadsX threads
+
+  HETM_DEB_THRD_CPU("Thread %i launches HeTM_checkTxCompressed in GPU %i",
+    threadData->id, j);
+
+  HeTM_checkTxCompressed.select(&HeTM_checkTxCompressed);
+  HeTM_checkTxCompressed.setNbBlocks(bo, 1, 1);
+  HeTM_checkTxCompressed.setThrsPerBlock(nbThreadsX, 1, 1);
+  HeTM_checkTxCompressed.setDevice(j);
+  HeTM_checkTxCompressed.setStream(threadData->stream);
+  HeTM_checkTxCompressed.setArgs(&checkTxCompressed_args);
+  HeTM_checkTxCompressed.run();
+  // -----------------------------------------------
+
+  return 0;
+}
+
+static int launchApplyKernel(HeTM_thread_s *threadData, size_t wsetSize)
+{
+  // TODO: add early validation kernel
+  // if (!doApply) { return 0; }
+
+  // for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+  int j = threadData->devId;
+  memman_select_device(j);
+
+  HeTM_CPULogEntry *vecDev;
+  size_t sizeBuffer = STM_LOG_BUFFER_SIZE * LOG_SIZE;
+  int tid = threadData->id;
+
+  vecDev = (HeTM_CPULogEntry*)HeTM_shared_data[j].bmap_wset_CPU_hostptr;
+  vecDev += tid*sizeBuffer; // each thread has a bit of the buffer
+
+  // -----------------------------------------------
+  //Calc number of blocks
+  int nbThreadsX = 256;
+  int bo = (wsetSize + nbThreadsX-1) / (nbThreadsX);
+
+  // Memory region of the entry object
+  // printf("dev = %i batchCount = %li\n", j, HeTM_shared_data[j].batchCount);
+  HeTM_cmp_s checkTxCompressed_args = {
+    .knlArgs = {
+      .devId = j,
+      .otherDevId = -1,
+      .nbOfGPUs = HETM_NB_DEVICES,
+      .sizeWSet = (int)wsetSize,
+      .sizeRSet = (int)HeTM_shared_data[j].rsetLogSize,
+      .idCPUThr = (int)threadData->id,
+      .batchCount = (unsigned char)HeTM_gshared_data.batchCount
+    },
+    .clbkArgs = threadData
+  };
+
+  dim3 blocksCheck(bo); // partition the stm_log by the different blocks
+  dim3 threadsPerBlock(nbThreadsX); // each block has nbThreadsX threads
+
+  HETM_DEB_THRD_CPU("Thread %i launches HeTM_applyTxCompressed in GPU %i",
+    threadData->id, j);
+
+  HeTM_checkTxCompressed.select(&HeTM_applyTxCompressed);
+  HeTM_checkTxCompressed.setNbBlocks(bo, 1, 1);
+  HeTM_checkTxCompressed.setThrsPerBlock(nbThreadsX, 1, 1);
+  HeTM_checkTxCompressed.setDevice(j);
+  HeTM_checkTxCompressed.setStream(threadData->stream);
+  HeTM_checkTxCompressed.setArgs(&checkTxCompressed_args);
+  HeTM_checkTxCompressed.run();
+  // -----------------------------------------------
+
+  return 0;
+}
+
+void checkCPUCmpDone(int devId)
+{
+  if (HeTM_thread_data[devId]->isCmpDone) {
+    // HETM_DEB_THRD_CPU("Thread %i CMP with GPU %i is done", HeTM_thread_data[devId]->id, devId);
+    // No limit for the number of rounds (TODO: no longer using HETM_CPU_INV)
+    if (HeTM_is_interconflict(devId)) {
+      if (!doneWithCPUlog[devId]) {
+        HETM_DEB_THRD_CPU("Thread %i CMP found conflict", HeTM_thread_data[devId]->id);
+        doneWithCPUlog[devId] = 1;
+        __sync_add_and_fetch(&HeTM_shared_data[devId].threadsWaitingSync, 1);
+      }
+      HeTM_thread_data[devId]->statusCMP = HETM_CMP_BLOCK;
+      __sync_synchronize();
+    }
+  }
+}
+
+static void asyncGetInterConflFlag(void*)
+{
+  if (!consecutiveFlagCpy) {
+    consecutiveFlagCpy = 1;
+    for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+      HeTM_set_is_interconflict(j, HeTM_get_inter_confl_flag(j, HeTM_memStream2[j], 1));
+    } 
+  }
+}

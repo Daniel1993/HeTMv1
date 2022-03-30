@@ -1,0 +1,22 @@
+# $(SRC)/bank_w_enqueue.o 
+BENCH_BANK_SRCS  := \
+	$(BENCH_BANK_SRC_DIR)/workloads/common.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part1.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part2.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part3.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part4.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part5.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part6.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part7.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part8.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part9.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/bank_part10.cu \
+	$(BENCH_BANK_SRC_DIR)/workloads/cpu_txs.cpp \
+	$(BENCH_BANK_SRC_DIR)/bank.cpp \
+	$(BENCH_BANK_SRC_DIR)/bankKernel.cu \
+	$(BENCH_BANK_SRC_DIR)/cmp_kernels.cu \
+	$(BENCH_BANK_SRC_DIR)/setupKernels.cu \
+	$(BENCH_BANK_SRC_DIR)/zipf_dist.cpp \
+	$(BENCH_BANK_SRC_DIR)/kernel.cu
+
+BENCH_BANK_OBJS := $(addsuffix .o, $(basename $(BENCH_BANK_SRCS)))

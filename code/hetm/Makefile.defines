@@ -1,0 +1,84 @@
+# VERY IMPORTANT: you must set the R/W-set maximum size for PR-STM (benchmark dependent)
+PR_MAX_RWSET_SIZE ?= 128
+CMP_TYPE          ?= COMPRESSED
+LOG_TYPE          ?= VERS
+PROFILE           ?= 0
+OLD_BMAP_IMPL     ?= 0
+USE_UNIF_MEM      ?= 0
+DISABLE_NON_BLOCKING ?= 0
+BMAP_GRAN_BITS ?= 12
+LOG_SIZE            ?= 32768
+STM_LOG_BUFFER_SIZE ?= 4
+DISABLE_RS       ?= 0
+DISABLE_WS       ?= 0
+DISABLE_EARLY_VALIDATION ?= 0
+REDUCED_RS       ?= 0
+HETM_NB_DEVICES  ?= 2
+USE_TSX_IMPL     ?= 0
+
+SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
+SYS_CPU_NB_CORES=$(shell cat /proc/cpuinfo | grep processor | wc -l)
+
+DEFINES += \
+  -DPR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+  -DSYS_CPU_MAX_FREQ=$(SYS_CPU_MAX_FREQ) \
+  -DSYS_CPU_NB_CORES=$(SYS_CPU_NB_CORES) \
+  -DLOG_SIZE=$(LOG_SIZE) \
+  -DHETM_REDUCED_RS=$(REDUCED_RS) \
+  -DSTM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE) \
+  -DHETM_NB_DEVICES=$(HETM_NB_DEVICES) \
+  -DBMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
+
+ifeq ($(DISABLE_RS),1)
+DEFINES += -DHETM_DISABLE_RS=1
+endif
+
+ifeq ($(DISABLE_WS),1)
+DEFINES += -DHETM_DISABLE_WS=1
+endif
+
+ifeq ($(USE_UNIF_MEM),1)
+DEFINES += -DUSE_UNIF_MEM=1
+endif
+
+ifeq ($(OVERLAP_CPY_BACK),1)
+DEFINES += -DHETM_OVERLAP_CPY_BACK=1
+endif
+
+ifeq ($(DISABLE_NON_BLOCKING),1)
+DEFINES += -DDISABLE_NON_BLOCKING=1
+endif
+
+ifeq ($(OLD_BMAP_IMPL),1)
+DEFINES += -DHETM_OLD_BMAP_IMPL
+endif
+
+############
+### CMP_TYPE
+ifeq ($(CMP_TYPE),COMPRESSED)
+DEFINES += -DHETM_CMP_TYPE=1
+endif
+ifeq ($(CMP_TYPE),DISABLED)
+DEFINES += -DHETM_CMP_TYPE=0
+endif
+############
+
+############
+### LOG_TYPE
+ifeq ($(LOG_TYPE),VERS)
+DEFINES += -DHETM_LOG_TYPE=1
+endif
+ifeq ($(LOG_TYPE),VERS2)
+DEFINES += -DHETM_LOG_TYPE=4
+endif
+ifeq ($(LOG_TYPE),ADDR)
+DEFINES += -DHETM_LOG_TYPE=2
+endif
+ifeq ($(LOG_TYPE),BMAP)
+DEFINES += -DHETM_LOG_TYPE=3
+endif
+############
+
+ifeq ($(PROFILE),1)
+DEFINES += -DUSE_NVTX
+endif

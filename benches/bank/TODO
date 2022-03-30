@@ -1,0 +1,64 @@
+1)
+1Thread --> use non-instrumented/sequential benchmark
+
+2)
+Version log is killing HTM transactions
+  --> current solution is to postpone the writes to the log to after htm_commit
+
+3)
+version is now set to 0, it should be set to some value (e.g. rdtsc)
+
+
+MEETING 28/09
+
+  --> how the granule pool is copied to the GPU?
+      > jobWithCuda_dupd(*cd, a) // what is it coping to the GPU? the accounts?
+      I think it only copies the accounts if CMP_APPLY==1 && LOG_TYPE!=2
+
+      latter, the results (dataset with all bank accounts) are copied back to the CPU using
+      > jobWithCuda_hupd(cd, a, valid_vec )
+
+      with CPU_INV on there is a
+      > jobWithCuda_backup(cd);
+      what is CPU_INV? Is the backup a rollback for the CPU?
+
+      what jobWithCuda_swap(*cd) does? The comment says "Overwrites devices working set with the hosts"
+      does it rollback the GPU dataset?
+
+      then there is this
+      #if CMP_APPLY==0
+        ... jobWithCuda_run(cd,a ) ...
+      #else
+        ... jobWithCuda_run(cd, helper ) ...
+
+      what is the difference from the "helper" to the "a"?
+
+      where do you process the write set from the GPU? somewhere you should merge the GPU
+      dataset with the CPU dataset (assuming both commit all the batch)...
+
+  --> How does the CPU abort work?
+      where is done the rollback of the CPU in the code?
+
+      Do you do like this:
+      > GPU processes CPU write-set:
+         Conflict detected!
+      > CPU gets a copy of GPU dataset
+         memcpy into the existing one in CPU memory
+
+  --> You have 3 kernels for dataset validation:
+    checkTransactionKernel   // Compare device write-log with host log.
+    checkTransactionKernel2  // Compare device write-log with host log, when using compressed log
+    checkTransactionKernel3  // Compare device write-log with host log.
+
+    the last one only compiles with COMPARE_NO_LOCK==1
+
+    are the comments correct? what is the difference between them?
+    is checkTransactionKernel2 the one that checks the versions and allows the
+    CPU to keep doing transaction?
+
+  --> What parameter controls the minimum number of transactions before the CPU calls the
+   GPU to do more log comparisons (in the version log)?
+    I got that after some transactions the CPU sends log to the GPU to compare with the
+    GPU dataset (check for conflicts). Is this a parameter that can be tuned?
+
+  

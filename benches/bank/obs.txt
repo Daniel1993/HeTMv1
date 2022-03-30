@@ -1,0 +1,49 @@
+
+
+2021-01-11 
+
+compile with:
+cd ../deps/cuda-utils/ ; make clean ; make CFG=debug ; cd - ; make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=400 BANK_PART=10 GPU_PART=0.50 CPU_PART=0.50 P_INTERSECT=0.00 PROFILE=1  BANK_INTRA_CONFL=0.0 LOG_SIZE=4096 STM_LOG_BUFFER_SIZE=256 DISABLE_NON_BLOCKING=0 OVERLAP_CPY_BACK=0 CFG=debug PRINT_DEB=0 HETM_NB_DEVICES=2 -j 14
+
+blocking with 2 real GPUs or with 2 CPU threads in my single GPU settings
+
+2021-01-15
+
+still blocking, strange sync issue
+
+build command
+cd ../deps/cuda-utils/ ; make clean ; make CFG=debug ; cd - ; make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=400 BANK_PART=10 GPU_PART=0.50 CPU_PART=0.50 P_INTERSECT=0.00 PROFILE=1  BANK_INTRA_CONFL=0.0 LOG_SIZE=4096 STM_LOG_BUFFER_SIZE=256 DISABLE_NON_BLOCKING=0 OVERLAP_CPY_BACK=0 CFG=debug PRINT_DEB=1 HETM_NB_DEVICES=2 -j 14
+
+gdb command (single GPU machine):
+cuda-gdb --args ./bank -n 2 -b 4 -x 128 -T 1 -a 100000 -d 15000 -R 0 -S 1 -l 1 -N 1 -f some_file.txt CPU_BACKOFF=1 GPU_BACKOFF=1
+
+2021-01-20
+
+discovered that there was an issue with the flags:
+
+(1) HeTM_thread_data[<gpuId>]->isCpyDone
+(2) HeTM_shared_data[<gpuId>].threadsWaitingSync
+
+managed to fix point (1), point (2) is more tricky...
+
+2021-01-26
+
+fixed the issues added a new flag (anyDoneOrIdle) in cpyWSetToGPU (CPU code).
+
+2021-09-29
+
+PR-STM does not commit any transaction...
+
+2021-10-04
+
+Fixed makefile, changing any dependency makes it rebuild.
+Also added alldeps to makefile
+
+make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=400 BANK_PART=1 GPU_PART=0.50 CPU_PART=0.50 P_INTERSECT=0.00 PROFILE=1  BANK_INTRA_CONFL=0.0 LOG_SIZE=4096 STM_LOG_BUFFER_SIZE=256 DISABLE_NON_BLOCKING=0 OVERLAP_CPY_BACK=0 CFG=debug PRINT_DEB=1 HETM_NB_DEVICES=2 -j 14
+
+there is some issue with knlman... this command:
+
+cuda-gdb --args ./bank -n 1 -b 1 -x 1 -T 4 -a 100000 -d 15000 -R 20 -S 1 -l 1 -N 1 -f some_file.txt CPU_BACKOFF=1 GPU_BACKOFF=1
+
+breaks
+

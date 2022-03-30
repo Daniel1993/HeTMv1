@@ -1,0 +1,40 @@
+# TODO: check support
+# TODO: import CPPUNIT
+message(STATUS "Checking cuda support...")
+find_package(CUDA QUIET REQUIRED)
+if(!CUDA_TOOLKIT_ROOT_DIR)
+  message(FATAL_ERROR "CUDA_TOOLKIT_ROOT_DIR not defined.")
+endif()
+
+# TODO: set nvidia arch
+set(CUDA_PROPAGATE_HOST_FLAGS "FALSE")
+# -dc == --relocatable-device-code --> they say it could be slower as some optimizations are skipped
+# this is needed for more modular code
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -arch=sm_60" )
+
+# includes dependencies
+if(CUDA_UTIL_DIR)
+  include_directories("${CUDA_UTIL_DIR}/include")
+else()
+  message(FATAL_ERROR "CUDA_UTIL_DIR must be defined.")
+endif()
+
+message(STATUS "Checking c11 support...")
+CHECK_C_COMPILER_FLAG("-std=c11" COMPILER_SUPPORTS_C11)
+if(COMPILER_SUPPORTS_C11)
+  set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -std=c11")
+else()
+  message(FATAL_ERROR "The compiler ${CMAKE_C_COMPILER} has no C11 support. Please use a different C compiler.")
+endif()
+
+message(STATUS "Checking c++11 support...")
+CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
+if(COMPILER_SUPPORTS_CXX11)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++11" )
+else()
+  message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
+endif()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -finline-functions")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=native -finline-functions")

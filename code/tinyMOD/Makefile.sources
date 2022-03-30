@@ -1,0 +1,6 @@
+# define first TINY_MOD_DIR
+TINY_MOD_SRCS := \
+    $(TINY_MOD_DIR)/src/stm_internal.h \
+    $(TINY_MOD_DIR)/src/stm_wbctl.h \
+    $(TINY_MOD_DIR)/src/stm_wbetl.h \
+    $(TINY_MOD_DIR)/src/stm_wt.h 

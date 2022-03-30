@@ -1,0 +1,118 @@
+# Path to root directory
+ROOT ?= .
+CURR_DIR ?= ~/projs/HeTM_V1/code/tinyMOD
+
+# CC, LD and AR are builtin-variables of Make (?= is useless in this case)
+# To override these defines, you must use "make CC=cc" or change it here
+# Linker set by default to the CC definition
+LD = $(CC)
+# Other tools
+DOXYGEN ?= doxygen
+UNIFDEF ?= unifdef
+
+# Define global parameters
+TM = stm
+SRCDIR = $(ROOT)/src
+INCDIR = $(ROOT)/include
+
+HETM_DIR ?= $(CURR_DIR)/../hetm
+CUDA_UTIL_DIR ?= $(CURR_DIR)/../../deps/cuda-utils
+ARCH_DEP_DIR ?= $(CURR_DIR)/../../deps/arch_dep
+
+LIBDIR = $(ROOT)/lib
+# CUDIR = /usr/local/cuda
+# CUINCDIR = ${CUDIR}/include
+# CULIBDIR = ${CUDIR}/lib64
+# CUFLAGS = -L${CULIBDIR} -L${CUDIR}/compat -lcudart -lcuda -I${CUINCDIR}
+TMLIB = $(LIBDIR)/lib$(TM).a
+
+LOG_TYPE ?= BMAP
+############
+### LOG_TYPE
+ifeq ($(LOG_TYPE),VERS)
+DEFINES += -DHETM_LOG_TYPE=1
+endif
+ifeq ($(LOG_TYPE),ADDR)
+DEFINES += -DHETM_LOG_TYPE=2
+endif
+ifeq ($(LOG_TYPE),BMAP)
+DEFINES += -DHETM_LOG_TYPE=3
+endif
+ifeq ($(LOG_TYPE),VERS2)
+DEFINES += -DHETM_LOG_TYPE=4
+endif
+############
+
+# Supposing all compilers has -I -L
+# TODO -I$(SRCDIR) only for library build
+#CPPFLAGS += -I$(INCDIR) -I$(SRCDIR) $(CUFLAGS) -I $(ARCH_DEP_DIR)/include
+CPPFLAGS += -I$(INCDIR) -I$(SRCDIR) -I $(ARCH_DEP_DIR)/include
+
+# HeTM modification: include the log from HeTM library
+#! IMPORTANT: needs to add hetm CPU instrumentation object
+#  $(HETM_DIR)/hetm-inst-cpu.o
+CPPFLAGS += -I $(HETM_DIR)/include
+#CPPFLAGS += -I $(HETM_DIR)/include -L $(HETM_DIR) -lhetm
+CPPFLAGS += -I $(CUDA_UTIL_DIR)/include -L $(CUDA_UTIL_DIR) -lcuda-util
+
+# Disable assert for non-debug build
+ifneq ($(CFG),debug)
+  CPPFLAGS += -DNDEBUG
+endif
+
+ifeq ($(INST_CPU),1)
+  CPPFLAGS += -DHETM_INSTRUMENT_CPU
+endif
+
+# TODO Should be only for test binaries
+LDFLAGS += -L$(LIBDIR) -l$(TM)  $(HETM_DIR)/hetm-inst-cpu.o
+
+# Only on linux / TODO make source compatible with non-pthread OS
+LDFLAGS += -lpthread
+
+# Solaris default memory allocator is quite slow, better use mtmalloc
+# LDFLAGS += -lmtmalloc
+
+# Disable additional checks from glibc (__longjmp_chk/__printf_chk)
+# CPPFLAGS += -U_FORTIFY_SOURCE
+# CPPFLAGS += -D_FORTIFY_SOURCE=0
+# Enable multi-thread support in glibc
+CPPFLAGS += -D_REENTRANT
+
+# Rely on the definition of CC to determine the compiler
+# if the compiler is not detected correctly, use "gmake COMPILER=your_compiler"
+# Default: gcc
+#COMPILER ?= $(CC)
+COMPILER ?= nvcc
+ifeq ($(COMPILER),icc)
+include $(ROOT)/Makefile.icc
+else
+ifeq ($(COMPILER),suncc)
+include $(ROOT)/Makefile.suncc
+else
+ifeq ($(COMPILER),xlc)
+else
+ifeq ($(COMPILER),llvm-gcc)
+else
+ifeq ($(COMPILER),clang)
+include $(ROOT)/Makefile.clang
+else
+include $(ROOT)/Makefile.gcc
+endif
+endif
+endif
+endif
+endif
+
+########################################################################
+# libatomic_ops path
+# LIBAO_HOME must be set to the path of libatomic_ops
+# (use the embedded light libatomic_ops if LIBAO_HOME is not defined)
+########################################################################
+ifndef LIBAO_HOME
+  LIBAO_HOME = $(SRCDIR)/atomic_ops
+  LIBAO_INC = $(LIBAO_HOME)
+else
+  LIBAO_INC = $(LIBAO_HOME)/include
+endif
+CPPFLAGS += -I$(LIBAO_INC)

@@ -1,0 +1,16 @@
+CODE_HETM_SRCS := \
+	$(CODE_HTM_SRC_DIR)/hetm.cu \
+	$(CODE_HTM_SRC_DIR)/hetm-cpu-main-loop.cu \
+	$(CODE_HTM_SRC_DIR)/hetm-gpu-main-loop.cu \
+	$(CODE_HTM_SRC_DIR)/hetm-threading.cu \
+	$(CODE_HTM_SRC_DIR)/hetm-threading-cpu.cpp \
+	$(CODE_HTM_SRC_DIR)/hetm-threading-gpu.cpp \
+	$(CODE_HTM_SRC_DIR)/hetm-prstm-aux-fn.cpp \
+	$(CODE_HTM_SRC_DIR)/hetm-memory.cu \
+	$(CODE_HTM_SRC_DIR)/hetm-curand.cu \
+	$(CODE_HTM_SRC_DIR)/hetm-cmp-kernels.cu \
+	$(CODE_HTM_SRC_DIR)/ticket-barrier.c \
+	$(CODE_HTM_SRC_DIR)/hetm-producer-consumer.cpp
+
+CODE_HETM_OBJS := \
+	$(addsuffix .o, $(basename $(CODE_HETM_SRCS)))
