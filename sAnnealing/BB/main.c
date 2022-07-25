@@ -70,6 +70,37 @@ main(int argc,
   // BBLibState.G = loadG(stream);
   // fclose(stream);
 
+  BB_printBestSolution();
+
+
+
+  printf(" TEST WITH MATRIX \n");
+  unsigned char mat[] = {
+    0, 1, 1, 0,
+    1, 0, 1, 1,
+    1, 1, 0, 0,
+    1, 0, 0, 0
+    };
+  long weights[] = {
+    1, 1, 2, 10
+  };
+  graph G = fromSquareMat(4, mat);
+  BB_setWeights(weights);
+  BB_reset(G);
+  BB_run();
+  BB_printBestSolution();
+
+  long weights2[] = {
+    1, 2, 1, 1
+  };
+  G = fromSquareMat(4, mat);
+  BB_setWeights(weights2);
+  BB_reset(G);
+  BB_run();
+  BB_printBestSolution();
+
+
+
   BB_destroy(/*bb*/);
 
   return 0;

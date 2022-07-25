@@ -13,10 +13,16 @@
 #include "zipf_dist.hpp"
 
 #include "memcd.h"
+#include "memman.hpp"
+
+using namespace memman;
 
 /* ################################################################### *
 * GLOBALS
 * ################################################################### */
+
+// global
+thread_data_t parsedData;
 
 // static std::random_device randDev{};
 static std::mt19937 generator;
@@ -28,11 +34,25 @@ static int isGPUBatchSteal = 0;
 
 static unsigned memcached_global_clock = 0;
 
+size_t size_of_CPU_input_buffer;
+size_t size_of_GPU_input_buffer;
+size_t maxGPUoutputBufferSize;
+size_t currMaxCPUoutputBufferSize;
+size_t accountsSize; // TODO: these are probably local variables
+size_t sizePool;
+void *gpuMempool;
+
 int nbOfGPUSetKernels = 0; // called extern in memcdKernel.cu
-int *GPUoutputBuffer; // called extern in input_buffer.c
+int *GPUoutputBuffer[HETM_NB_DEVICES]; // called extern in input_buffer.c
 int *CPUoutputBuffer;
-int *GPUInputBuffer;
+int *GPUInputBuffer[HETM_NB_DEVICES];
 int *CPUInputBuffer;
+
+memman::MemObjOnDev GPU_input_buffer_good;
+memman::MemObjOnDev GPU_input_buffer_bad;
+memman::MemObjOnDev GPU_input_buffer;
+memman::MemObjOnDev GPU_output_buffer;
+extern memman::MemObjOnDev memcd_global_ts;
 
 #ifndef REQUEST_LATENCY
 #define REQUEST_LATENCY 10.0
@@ -93,6 +113,7 @@ static int fill_GPU_input_buffers()
 #elif BANK_PART == 6
 	GPUbuffer_ZIPF_2();
 #endif
+	return 0;
 }
 
 static int fill_CPU_input_buffers()
@@ -110,6 +131,7 @@ static int fill_CPU_input_buffers()
 #elif BANK_PART == 6
 	CPUbuffer_ZIPF_2();
 #endif
+	return 0;
 }
 
 static void wait_ms(float msTime)
@@ -137,7 +159,7 @@ static void produce_input()
 	// }
 	__sync_synchronize(); // memory fence
 	wait_ms(REQUEST_LATENCY);
-	if (!HeTM_is_stop(0)) {
+	if (!HeTM_is_stop()) {
 		produce_input();
 	}
 }
@@ -627,9 +649,11 @@ static void before_batch(int id, void *data)
 
 static void after_batch(int id, void *data)
 {
-	memman_select("GPU_output_buffer");
-	memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
-	// TODO: conflict mechanism
+	for (int j = 0; j < HETM_NB_DEVICES; ++j)
+	{
+		Config::GetInstance()->SelDev(j);
+		GPU_output_buffer.GetMemObj(j)->CpyDtH();
+	}
 }
 
 static void before_kernel(int id, void *data) { }
@@ -682,6 +706,7 @@ static void test_cuda(int id, void *data)
   account_t *base_ptr = d->memcd->key;
 	int  notEnoughInput = 0;
 	int          gotTXs = 0;
+	int           devId = Config::GetInstance()->SelDev();
 
 	static int counter = 0;
 
@@ -699,9 +724,9 @@ static void test_cuda(int id, void *data)
 		gotTXs = 1;
 		counter = (counter + 1) % NB_OF_GPU_BUFFERS;
 
-		memman_select("GPU_input_buffer_good"); // GPU input buffer
-		int *cpuInput = (int*)memman_get_cpu(NULL);
-		int *gpuInput = (int*)memman_get_gpu(NULL);
+		int *cpuInput = (int*)GPU_input_buffer_good.GetMemObj()->host;
+		// TODO: multiGPU
+		int *gpuInput = (int*)GPU_input_buffer_good.GetMemObj(0)->dev;
 		cpuInput += counter * maxGPUoutputBufferSize;
 
 		CUDA_CPY_TO_DEV_ASYNC(gpuInput, cpuInput, maxGPUoutputBufferSize * sizeof(int), PR_getCurrentStream());
@@ -720,9 +745,8 @@ static void test_cuda(int id, void *data)
 		gotTXs = 1;
 		counter = (counter + 1) % NB_OF_GPU_BUFFERS;
 
-		memman_select("GPU_input_buffer_bad"); // GPU input buffer
-		int *cpuInput = (int*)memman_get_cpu(NULL);
-		int *gpuInput = (int*)memman_get_gpu(NULL);
+		int *cpuInput = (int*)GPU_input_buffer_bad.GetMemObj(devId)->host;
+		int *gpuInput = (int*)GPU_input_buffer_bad.GetMemObj(devId)->dev;
 		cpuInput += counter * maxGPUoutputBufferSize;
 
 		// TODO: after a bad batch all abort (only happens on the GPU steal)
@@ -753,16 +777,15 @@ static void test_cuda(int id, void *data)
 			COMPILER_FENCE(); // reads HeTM_is_stop() (needed for optimization flags)
 		} while ((startInputPtr[GPU_QUEUE] + NB_GPU_TXS > endInputPtr[GPU_QUEUE]
 			&& startInputPtr[SHARED_QUEUE] + NB_GPU_TXS > endInputPtr[SHARED_QUEUE])
-			&& !HeTM_is_stop(0)); // wait
+			&& !HeTM_is_stop()); // wait
 
 		// HeTM_set_GPU_status(HETM_BATCH_RUN);
 		// __sync_synchronize();
 		jobWithCuda_runEmptyKernel(d, cd, base_ptr, *(d->memcd->globalTs));
-	} else {
-
-		memman_select("memcd_global_ts");
-		memman_cpy_to_gpu(PR_getCurrentStream(), NULL, 1);
-
+	}
+	else
+	{
+		memcd_global_ts.GetMemObj(devId)->CpyHtD(PR_getCurrentStream());
 		jobWithCuda_runMemcd(d, cd, base_ptr, *(d->memcd->globalTs));
 	}
 }
@@ -815,6 +838,7 @@ int main(int argc, char **argv)
   pthread_t *threads;
   barrier_t barrier;
   sigset_t block_set;
+	const int nbGPUs = HETM_NB_DEVICES;
 
   memset(&parsedData, 0, sizeof(thread_data_t));
 
@@ -825,31 +849,63 @@ int main(int argc, char **argv)
   bank_parseArgs(argc, argv, &parsedData);
 
 	// ---------------------------------------------------------------------------
-	maxGPUoutputBufferSize = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
-	NB_GPU_TXS = maxGPUoutputBufferSize;
+	maxGPUoutputBufferSize = parsedData.GPUthreadNum*parsedData.GPUblockNum*sizeof(int);
 	currMaxCPUoutputBufferSize = maxGPUoutputBufferSize; // realloc on full
 
-	// malloc_or_die(GPUoutputBuffer, maxGPUoutputBufferSize);
-	int sizeOfFlag_TXDone = maxGPUoutputBufferSize; // 1 Byte per GPU TX
-	// memman_alloc_dual("GPU_output_buffer", maxGPUoutputBufferSize*sizeof(memcd_get_output_t) + sizeOfFlag_TXDone, 0);
-	// GPUoutputBuffer = (int*)memman_get_gpu(NULL);
-	memman_alloc_dual("GPU_output_buffer", maxGPUoutputBufferSize*sizeof(memcd_get_output_t) + sizeOfFlag_TXDone, 0);
-	for (int j = 0; j < HETM_NB_DEVICES; ++j) {
-		memman_select_device(j);
-		GPUoutputBuffer[j] = (int*)memman_get_gpu(NULL);
+	size_of_GPU_input_buffer = maxGPUoutputBufferSize; // each transaction has 1 input
+	// TODO: this parsedData.nb_threads is what comes of the -n input
+	size_of_CPU_input_buffer = parsedData.nb_threads*sizeof(int) * (nbGPUs+1) * NB_CPU_TXS_PER_THREAD;
+
+	for (int j = 0; j < nbGPUs; ++j)
+	{
+		MemObjBuilder b;
+		MemObj *m;
+		Config::GetInstance()->SelDev(j);
+		GPU_output_buffer.AddMemObj(m = new MemObj(b
+			.SetSize(maxGPUoutputBufferSize)
+			->SetOptions(MEMMAN_NONE)
+			->AllocDevPtr()
+			->AllocHostPtr(),
+			j
+		));
+		GPUoutputBuffer[j] = (int*)m->dev;
 		// printf("<<<<<<<<<<<< dev %i GPUoutputBuffer = %p\n", j, GPUoutputBuffer[j]);
 	}
 
-	size_of_GPU_input_buffer = NB_OF_GPU_BUFFERS*maxGPUoutputBufferSize*sizeof(int);
+	for (int j = 0; j < nbGPUs; ++j)
+	{
+		MemObjBuilder b_input_buffer;
+		MemObjBuilder b_input_buffer_good;
+		MemObjBuilder b_input_buffer_bad;
+		MemObj *m_input_buffer;
+		MemObj *m_input_buffer_good;
+		MemObj *m_input_buffer_bad;
 
-	// TODO: this parsedData.nb_threads is what comes of the -n input
-	size_of_CPU_input_buffer = parsedData.nb_threads*sizeof(int) * NB_CPU_TXS_PER_THREAD;
+		Config::GetInstance()->SelDev(j);
 
-	// copy the input before launching the kernel
-	memman_alloc_gpu("GPU_input_buffer", maxGPUoutputBufferSize*sizeof(int), NULL, 0);
-	GPUInputBuffer = (int*)memman_get_gpu(NULL);
-	memman_alloc_cpu("GPU_input_buffer_good", size_of_GPU_input_buffer, GPUInputBuffer, 0);
-	memman_alloc_cpu("GPU_input_buffer_bad", size_of_GPU_input_buffer, GPUInputBuffer, 0);
+		GPU_input_buffer.AddMemObj(m_input_buffer = new MemObj(b_input_buffer
+			.SetOptions(MEMMAN_NONE)
+			->SetSize(size_of_GPU_input_buffer)
+			->AllocDevPtr(),
+			j
+		));
+		GPUInputBuffer[j] = (int*)m_input_buffer->dev;
+
+		GPU_input_buffer_good.AddMemObj(m_input_buffer_good = new MemObj(b_input_buffer_good
+			.SetOptions(MEMMAN_NONE)
+			->SetSize(size_of_GPU_input_buffer*NB_OF_GPU_BUFFERS)
+			->SetDevPtr(m_input_buffer->dev)
+			->AllocHostPtr(),
+			j
+		));
+		GPU_input_buffer_bad.AddMemObj(m_input_buffer_bad = new MemObj(b_input_buffer_bad
+			.SetOptions(MEMMAN_NONE)
+			->SetSize(size_of_GPU_input_buffer*NB_OF_GPU_BUFFERS)
+			->SetDevPtr(m_input_buffer->dev)
+			->AllocHostPtr(),
+			j
+		));
+	}
 
 	// CPU Buffers
 	malloc_or_die(CPUInputBuffer, size_of_CPU_input_buffer * 2); // good and bad
@@ -859,8 +915,17 @@ int main(int argc, char **argv)
 	fill_CPU_input_buffers();
 	// ---------------------------------------------------------------------------
 
-  // #define EXPLICIT_LOG_BLOCK (parsedData.trans * BANK_NB_TRANSFERS)
-  HeTM_set_explicit_log_block_size(parsedData.trans * BANK_NB_TRANSFERS); // TODO:
+	size_t nbSets = parsedData.nb_accounts;
+	size_t nbWays = parsedData.num_ways;
+	accountsSize = nbSets*nbWays*sizeof(account_t);
+	// last one is to check if the set was changed or not
+	sizePool = accountsSize * 5 + nbSets*sizeof(account_t);
+
+	// Setting the key size to be 16
+	sizePool += accountsSize * 3; // already have 4B missing 3*4B
+
+	// Setting the value size to be 32
+	sizePool += accountsSize * 7; // already have 4B missing 7*4B
 
   HeTM_init((HeTM_init_s){
 // #if CPU_INV == 1
@@ -874,37 +939,54 @@ int main(int argc, char **argv)
 		.timeBudget   = parsedData.timeBudget,
 #if HETM_CPU_EN == 0
     .isCPUEnabled = 0,
-    .isGPUEnabled = 1
+    .isGPUEnabled = 1,
 #elif HETM_GPU_EN == 0
     .isCPUEnabled = 1,
-    .isGPUEnabled = 0
+    .isGPUEnabled = 0,
 #else /* both on */
     .isCPUEnabled = 1,
-    .isGPUEnabled = 1
+    .isGPUEnabled = 1,
 #endif
+		.mempool_size = (long)sizePool,
+		.mempool_opts = MEMMAN_NONE
   });
 
-	memman_alloc_dual("memcd_global_ts", sizeof(unsigned), 0);
+	MemObjBuilder b_memcd_global_ts;
+	MemObjBuilder b_CPU_memcd_global_ts;
+	MemObj *m_memcd_global_ts;
+	MemObj *m_CPU_memcd_global_ts = new MemObj(b_CPU_memcd_global_ts
+				.SetOptions(MEMMAN_NONE)
+				->SetSize(sizeof(unsigned))
+				->AllocHostPtr(), 0);
+	memcd_global_ts.AddMemObj(m_memcd_global_ts = new MemObj(b_memcd_global_ts
+			.SetOptions(MEMMAN_NONE)
+			->SetSize(sizeof(unsigned))
+			->AllocDevPtr()
+			->SetHostPtr(m_CPU_memcd_global_ts->host),
+			/* for CPU only to work */0
+		));
+	for (int j = 1; j < nbGPUs; ++j)
+	{
+		memcd_global_ts.AddMemObj(m_memcd_global_ts = new MemObj(b_memcd_global_ts
+				.SetOptions(MEMMAN_NONE)
+				->SetSize(sizeof(unsigned))
+				->AllocDevPtr()
+				->SetHostPtr(m_CPU_memcd_global_ts->host),
+				j
+			));
+	}
 
-	malloc_or_die(memcd, 1);
-	memcd->nbSets = parsedData.nb_accounts;
-	memcd->nbWays = parsedData.num_ways;
-	memcd->globalTs = (unsigned*)memman_get_cpu(NULL);
-	accountsSize = memcd->nbSets*memcd->nbWays*sizeof(account_t);
-	// last one is to check if the set was changed or not
-	sizePool = accountsSize * 5 + memcd->nbSets*sizeof(account_t);
-
-	// Setting the key size to be 16
-	sizePool += accountsSize * 3; // already have 4B missing 3*4B
-
-	// Setting the value size to be 32
-	sizePool += accountsSize * 7; // already have 4B missing 7*4B
-
-  HeTM_mempool_init(sizePool); // <K,V,TS_CPU,TS_GPU,STATE>
+	malloc_or_die(memcd, nbGPUs);
+	for (int j = 0; j < nbGPUs; ++j)
+	{
+		memcd[j].nbSets = nbSets;
+		memcd[j].nbWays = nbWays;
+		memcd[j].globalTs = (unsigned*)memcd_global_ts.GetMemObj(j)->host; // TODO: multiGPU
+	}
 
   // TODO:
-  parsedData.nb_threadsCPU = HeTM_shared_data.nbCPUThreads;
-  parsedData.nb_threads    = HeTM_shared_data.nbThreads;
+  parsedData.nb_threadsCPU = HeTM_gshared_data.nbCPUThreads;
+  parsedData.nb_threads    = HeTM_gshared_data.nbThreads;
 
 	// input manager will handle these
 	malloc_or_die(startInputPtr, 3);
@@ -928,51 +1010,51 @@ int main(int argc, char **argv)
   jobWithCuda_exit(NULL); // Reset Cuda Device
 
   malloc_or_die(threads, parsedData.nb_threads);
+  
+	DEBUG_PRINT("Initializing GPU.\n");
 
 	// mallocs 4 arrays (accountsSize * NUMBER_WAYS * 4)
-  HeTM_alloc((void**)&memcd->key, &gpuMempool, sizePool); // <K,V,TS,STATE>
-	memcd->extraKey = memcd->key + (memcd->nbSets*memcd->nbWays);
-	memcd->val      = memcd->extraKey + 3*(memcd->nbSets*memcd->nbWays);
-	memcd->extraVal = memcd->val + (memcd->nbSets*memcd->nbWays);
-	memcd->ts_CPU   = memcd->extraVal + 7*(memcd->nbSets*memcd->nbWays);
-	memcd->ts_GPU   = memcd->ts_CPU + (memcd->nbSets*memcd->nbWays);
-	memcd->state    = memcd->ts_GPU + (memcd->nbSets*memcd->nbWays);
-	memcd->setUsage = memcd->state + (memcd->nbSets*memcd->nbWays);
-
-  memset(memcd->key, 0, sizePool);
+	for (int j = 0; j < nbGPUs; ++j)
+	{
+		HeTM_alloc(j, (void**)&memcd[j].key, &gpuMempool, sizePool); // <K,V,TS,STATE>
+		memcd[j].extraKey = memcd[j].key + (memcd[j].nbSets*memcd[j].nbWays);
+		memcd[j].val      = memcd[j].extraKey + 3*(memcd[j].nbSets*memcd[j].nbWays);
+		memcd[j].extraVal = memcd[j].val + (memcd[j].nbSets*memcd[j].nbWays);
+		memcd[j].ts_CPU   = memcd[j].extraVal + 7*(memcd[j].nbSets*memcd[j].nbWays);
+		memcd[j].ts_GPU   = memcd[j].ts_CPU + (memcd[j].nbSets*memcd[j].nbWays);
+		memcd[j].state    = memcd[j].ts_GPU + (memcd[j].nbSets*memcd[j].nbWays);
+		memcd[j].setUsage = memcd[j].state + (memcd[j].nbSets*memcd[j].nbWays);
+		memset(memcd[j].key, 0, sizePool);
+	}
+	cuda_t *cuda_st;
+	cuda_st = jobWithCuda_init(memcd[j].key, parsedData.nb_threadsCPU,
+		sizePool, parsedData.trans, 0, parsedData.GPUthreadNum, parsedData.GPUblockNum,
+		parsedData.hprob, parsedData.hmult);
+	for (int j = 0; j < nbGPUs; ++j)
+	{
+		jobWithCuda_initMemcd(cuda_st+j, parsedData.num_ways, parsedData.nb_accounts,
+			parsedData.set_percent, parsedData.shared_percent);
+		cuda_st->memcd_array_size = accountsSize;
+		cuda_st->memcd_nbSets = memcd[j].nbSets;
+		cuda_st->memcd_nbWays = memcd[j].nbWays;
+  	parsedData.cd = cuda_st;
+		//DEBUG_PRINT("Base: %lu %lu \n", bank->accounts, &bank->accounts);
+		if (cuda_st == NULL) {
+			printf("CUDA init failed.\n");
+			exit(-1);
+		}
+	}
   parsedData.memcd = memcd;
-
-  DEBUG_PRINT("Initializing GPU.\n");
-
-  cuda_t *cuda_st;
-  cuda_st = jobWithCuda_init(memcd->key, parsedData.nb_threadsCPU,
-    sizePool, parsedData.trans, 0, parsedData.GPUthreadNum, parsedData.GPUblockNum,
-    parsedData.hprob, parsedData.hmult);
-
-  jobWithCuda_initMemcd(cuda_st, parsedData.num_ways, parsedData.nb_accounts,
-    parsedData.set_percent, parsedData.shared_percent);
-	cuda_st->memcd_array_size = accountsSize;
-	cuda_st->memcd_nbSets = memcd->nbSets;
-	cuda_st->memcd_nbWays = memcd->nbWays;
-
-  parsedData.cd = cuda_st;
-  //DEBUG_PRINT("Base: %lu %lu \n", bank->accounts, &bank->accounts);
-  if (cuda_st == NULL) {
-    printf("CUDA init failed.\n");
-    exit(-1);
-  }
 
   /* Init STM */
   printf("Initializing STM\n");
 
 	/* POPULATE the cache */
-	memman_select("GPU_input_buffer_good");
-	int *gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
+	int *gpu_buffer_cpu_ptr = (int*)GPU_input_buffer_good.GetMemObj()->host;
 	for (int i = 0; i < size_of_GPU_input_buffer/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
 	}
-	memman_select("GPU_input_buffer_bad");
-	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
+	gpu_buffer_cpu_ptr = (int*)GPU_input_buffer_bad.GetMemObj()->host;
 	for (int i = 0; i < size_of_GPU_input_buffer/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
 	}
@@ -981,7 +1063,10 @@ int main(int argc, char **argv)
 	// 	printf("%i : KEY=%i STATE=%i\n", i, memcd->key[i], memcd->state[i]);
 	// }
 
-	CUDA_CPY_TO_DEV(gpuMempool, memcd->key, sizePool);
+	for (int j = 0; j < nbGPUs; ++j)
+	{
+		CUDA_CPY_TO_DEV(gpuMempool, memcd[j].key, sizePool);
+	}
 	// printf(" >>>>>>>>>>>>>>> PASSOU AQUI!!!\n");
 	// call_cuda_check_memcd((int*)gpuMempool, accountsSize/sizeof(int));
 	// TODO: does not work: need to set the bitmap in order to copy
@@ -993,9 +1078,7 @@ int main(int argc, char **argv)
   // ###########################################################################
   for(j = 0; j < parsedData.iter; j++) { // Loop for testing purposes
     //Clear flags
-    for (int d = 0; d < HETM_NB_DEVICES; d++) {
-    	HeTM_set_is_stop(d, 0);
-		}
+		HeTM_set_is_stop(0);
     global_fix = 0;
 
     // ##############################################
@@ -1040,9 +1123,7 @@ int main(int argc, char **argv)
       sigemptyset(&block_set);
       sigsuspend(&block_set);
     }
-		for (int d = 0; d < HETM_NB_DEVICES; d++) {
-    	HeTM_set_is_stop(d, 1);
-		}
+		HeTM_set_is_stop(1);
 		__sync_synchronize();
 
     TIMER_READ(parsedData.end);
@@ -1080,7 +1161,6 @@ int main(int argc, char **argv)
   bank_statsFile(&parsedData);
 
   /* Delete bank and accounts */
-  HeTM_mempool_destroy();
   free(memcd);
 
   free(threads);
@@ -1093,6 +1173,7 @@ int main(int argc, char **argv)
 
 	printf("nbGPUStealBatches=%9i nbCPUStealBatches=%9i\n", nbGPUStealBatches, nbCPUStealBatches);
 	printf("timeDtD = %f\n", HeTM_stats_data.timeDtD);
+	HeTM_destroy();
 
   return EXIT_SUCCESS;
 }

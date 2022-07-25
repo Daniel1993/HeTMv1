@@ -215,16 +215,11 @@ PR_i_run(pr_tx_args_s *args)
 
 	// pass struct by value
 	PR_CHECK_CUDA_ERROR(cudaEventRecord(d->PR_eventKernelStart, stream), ""); // TODO: does not work in multi-thread
-	// if (stream != NULL) {
-		// int dev;
-		// cudaGetDevice(&dev);
-		// printf("Run kernel in device %i (cudaGetDevice = %i)\n", PR_curr_dev, dev);
-		args->callback<<< d->PR_blockNum, d->PR_threadNum, 0, stream >>>(args->dev);
-	// } else {
-	// 	// serializes
-	// 	args->callback<<< PR_blockNum, PR_threadNum >>>(args->dev);
-	// }
-	// printf("         [dev%i,curStrm=%i] PR_i_run\n", PR_curr_dev, curStream );
+
+	PR_CHECK_CUDA_ERROR(cudaGetLastError(), "before PR_i_run");
+	args->callback<<< d->PR_blockNum, d->PR_threadNum, 0, stream >>>(args->dev);
+	PR_CHECK_CUDA_ERROR(cudaGetLastError(), "after PR_i_run");
+
 	PR_CHECK_CUDA_ERROR(cudaEventRecord(d->PR_eventKernelStop, stream), "");
 	PR_CHECK_CUDA_ERROR(cudaStreamAddCallback(
 		stream, PR_i_afterStream, (void*)is, 0
@@ -290,11 +285,11 @@ PR_HOST void PR_run(void(*callback)(pr_tx_args_dev_host_s), pr_tx_args_s *pr_arg
 
 	PR_i_cudaPrepare(pr_args, callback);
 
-  	if (pr_clbk_before_run_ext)
+	if (pr_clbk_before_run_ext)
 		pr_clbk_before_run_ext(pr_args);
 	PR_i_run(pr_args);
-  	if (pr_clbk_after_run_ext)
-	  	pr_clbk_after_run_ext(pr_args);
+	if (pr_clbk_after_run_ext)
+		pr_clbk_after_run_ext(pr_args);
 }
 
 PR_HOST void PR_teardown()
@@ -325,30 +320,33 @@ PR_HOST void PR_useNextStream(pr_tx_args_s *args)
 	deviceId = PR_curr_dev % nbDevices;
 	PR_CHECK_CUDA_ERROR(cudaSetDevice(deviceId), "");
 
-	PR_CHECK_CUDA_ERROR(cudaGetLastError(), "before PR_reduceCommitAborts");
+	if (PR_enable_auto_stats)
+	{
+		PR_CHECK_CUDA_ERROR(cudaGetLastError(), "before PR_reduceCommitAborts");
 
-	PR_reduceCommitAborts<<<d->PR_blockNum, d->PR_threadNum, 0, d->PR_streams[d->PR_currentStream]>>>
-		(0, curStream, args->dev, (uint64_t*)d->PR_sumNbCommitsDev, (uint64_t*)d->PR_sumNbAbortsDev);
+		PR_reduceCommitAborts<<<d->PR_blockNum, d->PR_threadNum, 0, d->PR_streams[d->PR_currentStream]>>>
+			(0, curStream, args->dev, (uint64_t*)d->PR_sumNbCommitsDev, (uint64_t*)d->PR_sumNbAbortsDev);
 
-	PR_CHECK_CUDA_ERROR(cudaGetLastError(), "PR_reduceCommitAborts");
+		PR_CHECK_CUDA_ERROR(cudaGetLastError(), "PR_reduceCommitAborts");
 
-	struct internal_stats_ *is = (struct internal_stats_ *)malloc(sizeof(struct internal_stats_));
-	
-	is->curStream = (int)curStream;
-	is->devId = (int)PR_curr_dev;
+		struct internal_stats_ *is = (struct internal_stats_ *)malloc(sizeof(struct internal_stats_));
+		
+		is->curStream = (int)curStream;
+		is->devId = (int)PR_curr_dev;
 
-	// not first time, copy previous data
-	CUDA_CPY_TO_HOST_ASYNC(
-		d->PR_sumNbCommits,
-		d->PR_sumNbCommitsDev,
-		countSize, // also copies aborts
-		d->PR_streams[curStream]
-	);
-	CUDA_CHECK_ERROR(cudaStreamAddCallback(
-		d->PR_streams[curStream], PR_i_afterStats, (void*)is, 0
-	), "");
+		// not first time, copy previous data
+		CUDA_CPY_TO_HOST_ASYNC(
+			d->PR_sumNbCommits,
+			d->PR_sumNbCommitsDev,
+			countSize, // also copies aborts
+			d->PR_streams[curStream]
+		);
+		CUDA_CHECK_ERROR(cudaStreamAddCallback(
+			d->PR_streams[curStream], PR_i_afterStats, (void*)is, 0
+		), "");
 
-	PR_CHECK_CUDA_ERROR(cudaMemsetAsync(d->PR_sumNbCommitsDev, 0, countSize, d->PR_streams[d->PR_currentStream]), "");
+		PR_CHECK_CUDA_ERROR(cudaMemsetAsync(d->PR_sumNbCommitsDev, 0, countSize, d->PR_streams[d->PR_currentStream]), "");
+	}
 
 	// cudaDeviceSynchronize();
 	// printf("[dev%i] commits=%lu aborts=%lu\n", PR_curr_dev,

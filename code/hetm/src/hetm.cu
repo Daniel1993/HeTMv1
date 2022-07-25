@@ -164,19 +164,20 @@ int HeTM_init(HeTM_init_s init)
   
   for (int i = 0; i < nbGPUs; ++i)
   {
-    HeTM_set_is_stop(i, 0);
+    HeTM_set_is_stop(0);
     PR_curr_dev = i;
     // TODO: init here STM too
     PR_init({
-      .nbStreams = 2,
-      // .nbStreams = 1,
+      // .nbStreams = 2,
+      .nbStreams = 1,
       .lockTableSize = PR_LOCK_TABLE_SIZE
     }); // inits PR-STM mutex array
 
     Config::GetInstance()->SelDev(i);
 
     HeTM_memStream[i] = PR_global[PR_curr_dev].PR_streams[0];
-    HeTM_memStream2[i] = PR_global[PR_curr_dev].PR_streams[1];
+    // HeTM_memStream2[i] = PR_global[PR_curr_dev].PR_streams[1];
+    HeTM_memStream2[i] = PR_global[PR_curr_dev].PR_streams[0];
 
     pr_tx_args_s *pr_args = getPrSTMmetaData(PR_curr_dev);
     PR_global[PR_curr_dev].PR_blockNum = init.nbGPUBlocks;
@@ -205,14 +206,14 @@ int HeTM_destroy()
   // knlmanObjDestroy(&HeTM_checkTxCompressed);
   // knlmanObjDestroy(&HeTM_earlyCheckTxCompressed);
   // knlmanObjDestroy(&HeTM_checkTxExplicit);
+  HeTM_set_is_stop(1);
+  HeTM_async_set_is_stop(1);
   for (int i = 0; i < Config::GetInstance()->NbGPUs(); ++i)
   {
     Config::GetInstance()->SelDev(i);
 
     barrier_destroy(HeTM_shared_data[i].GPUBarrier);
     free(HeTM_shared_data[i].threadsInfo);
-    HeTM_set_is_stop(i, 1);
-    HeTM_async_set_is_stop(i, 1);
     HeTM_mempool_destroy(i);
   }
   hetm_pc_destroy(HeTM_offload_pc);
@@ -222,49 +223,53 @@ int HeTM_destroy()
 
 int HeTM_sync_barrier(int devId)
 {
-  if (!HeTM_is_stop(0)) {
+  if (!HeTM_is_stop())
     // printf("[%s] barrier dev %i\n", __FUNCTION__, devId);
     barrier_cross(HeTM_shared_data[devId].GPUBarrier);
-  } else {
+  else
     // printf("[%s] HeTM_flush_barrier\n", __FUNCTION__);
-    HeTM_flush_barrier(devId);
-  }
+    for (int j = 0; j < HETM_NB_DEVICES; ++j)
+      HeTM_flush_barrier(j);
   return 0;
 }
 
 int HeTM_sync_CPU_barrier()
 {
-  if (!HeTM_is_stop(0)) {
+  if (!HeTM_is_stop())
     barrier_cross(HeTM_gshared_data.CPUBarrier);
-  } else {
-    barrier_reset(HeTM_gshared_data.CPUBarrier);
-  }
+  else
+    for (int j = 0; j < HETM_NB_DEVICES; ++j)
+      HeTM_flush_barrier(j);
+  
   return 0;
 }
 
 int HeTM_sync_next_batch()
 {
-  if (!HeTM_is_stop(0)) {
+  if (!HeTM_is_stop())
     barrier_cross(HeTM_gshared_data.nextBatchBarrier);
-  } else {
-    barrier_reset(HeTM_gshared_data.nextBatchBarrier);
-  }
+  else
+    for (int j = 0; j < HETM_NB_DEVICES; ++j)
+      HeTM_flush_barrier(j);
   return 0;
 }
 
 int HeTM_sync_BB()
 {
-  if (!HeTM_is_stop(0)) {
+  if (!HeTM_is_stop())
     barrier_cross(HeTM_gshared_data.BBsyncBarrier);
-  } else {
-    barrier_reset(HeTM_gshared_data.BBsyncBarrier);
-  }
+  else
+    for (int j = 0; j < HETM_NB_DEVICES; ++j)
+      HeTM_flush_barrier(j);
   return 0;
 }
 
 int HeTM_flush_barrier(int devId)
 {
   barrier_reset(HeTM_shared_data[devId].GPUBarrier);
+  barrier_reset(HeTM_gshared_data.BBsyncBarrier);
+  barrier_reset(HeTM_gshared_data.nextBatchBarrier);
+  barrier_reset(HeTM_gshared_data.CPUBarrier);
   return 0;
 }
 
@@ -293,24 +298,73 @@ static void
 run_interGPUConflDetect(
   knlman_callback_params_s params
 ) {
-  dim3 blocks(params.blocks.x, params.blocks.y, params.blocks.z);
-  dim3 threads(params.threads.x, params.threads.y, params.threads.z);
   cudaStream_t stream = (cudaStream_t)params.stream;
   MemObj *m = params.entryObj;
   HeTM_cmp_s *data = (HeTM_cmp_s*)m->host;
+  HeTM_knl_cmp_args_s knl_cmp_args = data->knlArgs;
+  HeTM_knl_global_s knl_global = knl_cmp_args.knlGlobal;
+  size_t cacheSize = knl_global.hostWSetCacheSize;
+  unsigned char batchCount = data->knlArgs.batchCount;
+  int thereIsKernel = 0;
   // HeTM_thread_s *threadData = (HeTM_thread_s*)data->clbkArgs;
+
+  int dev0 = knl_cmp_args.devId;
+  int dev1 = knl_cmp_args.otherDevId;
+
+  Config::GetInstance()->SelDev(dev0);
+
+  unsigned char *rsetGPU0cache = (unsigned char *)HeTM_gpu_wset_cache.GetMemObj(dev0)->host;
+  unsigned char *wsetGPU1Cache = (unsigned char *)HeTM_gpu_wset_cache.GetMemObj(dev1)->host;
+
+  // unsigned char *rsetGPU0cache = (unsigned char *)knl_global.devRSetCache_hostptr[dev0];
+  // unsigned char *wsetGPU1Cache = (unsigned char *)knl_global.devWSetCache_hostptr[dev1];
+
+  // params.blocks.x has enough for all the granules
+  int blocksX = (params.blocks.x + (cacheSize-1)) / cacheSize;
+  size_t chunk_size = blocksX * params.threads.x; // just for 1 chunk
+
+  /* printf("interGPUConflDetect devId=%i dev0=%i dev1=%i batchCount=%i\n",
+        m->devId, dev0, dev1, (int)batchCount); */
+  char *remote_wset = (char*)HeTM_gpu_wset_ext[dev1].GetMemObj(dev0)->dev;
+  char *my_rset = (char*)HeTM_gpu_rset.GetMemObj(dev0)->dev;
 
   // TODO: for each chunk -> try cache, if conflict -> go for the full kernel
 
-  // CUDA_EVENT_RECORD(threadData->cmpStartEvent, stream);
-  interGPUConflDetect<<<blocks, threads, 0, stream>>>(data->knlArgs, 0);
-  // CUDA_EVENT_RECORD(threadData->cmpStopEvent, stream);
-  // HETM_DEB_THRD_CPU("\033[0;36m" "Thread %i inter confl detect GPU %i started" "\033[0m",
-  //     threadData->id, threadData->devId);
+  for (int i = 0; i < cacheSize; ++i)
+  {
+    int inGPU0RSet;
+    int inGPU1WSet;
+#ifdef BMAP_ENC_1BIT
+    inGPU0RSet = BMAP_CHECK_POS(rsetGPU0cache, i, batchCount);
+    inGPU1WSet = BMAP_CHECK_POS(wsetGPU1Cache, i, batchCount);
+#else /* BMAP_ENC_1BIT */
+    inGPU0RSet = (rsetGPU0cache[i] == batchCount);
+    inGPU1WSet = (wsetGPU1Cache[i] == batchCount);
+#endif /* BMAP_ENC_1BIT */
+    if (inGPU0RSet && inGPU1WSet)
+    {
+      dim3 blocks(blocksX, params.blocks.y, params.blocks.z);
+      dim3 threads(params.threads.x, params.threads.y, params.threads.z);
+      // CUDA_EVENT_RECORD(threadData->cmpStartEvent, stream);
+      /* printf("interGPUConflDetect offset = %i blocksX = %i devId = %i dev0=%i dev1=%i batchCount=%i\n",
+        i*chunk_size, blocksX, m->devId, dev0, dev1, (int)batchCount); */
+      interGPUConflDetect<<<blocks, threads, 0, stream>>>(data->knlArgs, remote_wset, my_rset, i*chunk_size);
+      thereIsKernel = 1;
+      
+      // /* REMOVE ME */CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)stream), "");
+
+      // CUDA_EVENT_RECORD(threadData->cmpStopEvent, stream);
+      // HETM_DEB_THRD_CPU("\033[0;36m" "Thread %i inter confl detect GPU %i started" "\033[0m",
+      //     threadData->id, threadData->devId);
+    }
+  }
   // TODO: move events somewhere else
-  CUDA_CHECK_ERROR(cudaStreamAddCallback(
-    stream, interGPUconflCallback, data->clbkArgs, 0
-  ), "");
+  if (thereIsKernel)
+  {
+    CUDA_CHECK_ERROR(cudaStreamAddCallback(
+      stream, interGPUconflCallback, data->clbkArgs, 0
+    ), "");
+  }
 }
 
 static void
@@ -323,19 +377,30 @@ run_CPUGPUConflDetect(
   HeTM_knl_cmp_args_s knl_cmp_args = data->knlArgs;
   HeTM_knl_global_s knl_global = knl_cmp_args.knlGlobal;
   size_t cacheSize = knl_global.hostWSetCacheSize;
+  size_t chunkSize = (HeTM_gshared_data.sizeMemPool/sizeof(PR_GRANULE_T) + (cacheSize-1)) / cacheSize;
+  int devId = knl_cmp_args.devId;
   unsigned char batchCount = data->knlArgs.batchCount;
-  unsigned char *cpuWSetCache = (unsigned char *)data->knlArgs.knlGlobal.hostWSetCache_hostptr;
-  unsigned char *rsetGPUcache = (unsigned char *)data->knlArgs.knlGlobal.devRSetCache_hostptr;
+  unsigned char *cpuWSetCache = (unsigned char *)HeTM_cpu_wset_cache.GetMemObj(devId)->host;
+  unsigned char *rsetGPUcache = (unsigned char *)HeTM_gpu_rset_cache.GetMemObj(devId)->host;
 
   for (int i = 0; i < cacheSize; ++i)
   {
-    int threadsX = (params.blocks.x + cacheSize - 1) / cacheSize;
-    if (cpuWSetCache[i] == batchCount && rsetGPUcache[i] == batchCount)
+    int threadsX = (params.blocks.x + chunkSize - 1) / params.blocks.x;
+    int inCPUWSet;
+    int inGPURSet;
+#ifdef BMAP_ENC_1BIT
+    inCPUWSet = BMAP_CHECK_POS(cpuWSetCache, i, batchCount);
+    inGPURSet = BMAP_CHECK_POS(rsetGPUcache, i, batchCount);
+#else /* BMAP_ENC_1BIT */
+    inCPUWSet = (cpuWSetCache[i] == batchCount);
+    inGPURSet = (rsetGPUcache[i] == batchCount);
+#endif /* BMAP_ENC_1BIT */
+    if (inCPUWSet && inGPURSet)
     {
       // printf("run_CPUGPUConflDetect pos %i/%zu\n", i, cacheSize);
       dim3 blocks(threadsX, params.blocks.y, params.blocks.z);
       dim3 threads(params.threads.x, params.threads.y, params.threads.z);
-      CPUGPUConflDetect<<<blocks, threads, 0, stream>>>(data->knlArgs, i*cacheSize);
+      CPUGPUConflDetect<<<blocks, threads, 0, stream>>>(data->knlArgs, i*chunkSize);
     }
   }
 }
@@ -350,15 +415,26 @@ run_CPUrsGPUwsConflDetect(
   size_t cacheSize = data->knlArgs.knlGlobal.hostWSetCacheSize;
   size_t cacheChunk = (HeTM_gshared_data.sizeMemPool/sizeof(PR_GRANULE_T) + (cacheSize-1)) / cacheSize;
   unsigned char batchCount = data->knlArgs.batchCount;
-  unsigned char *cpuRSetCache = (unsigned char *)data->knlArgs.knlGlobal.hostRSetCache_hostptr;
-  unsigned char *wsetGPUcache = (unsigned char *)data->knlArgs.knlGlobal.devWSetCache_hostptr;
+  int devId = data->knlArgs.devId;
+  // data->knlArgs.knlGlobal.devRSet
+  unsigned char *cpuRSetCache = (unsigned char *)HeTM_cpu_rset_cache.GetMemObj(devId)->host;
+  unsigned char *wsetGPUcache = (unsigned char *)HeTM_gpu_wset_cache.GetMemObj(devId)->host;
 
 // printf("run_CPUrsGPUwsConflDetect cacheSize = %zu cacheChunk = %zu batchCount = %i\n", cacheSize, cacheChunk, (int)batchCount);
   for (int i = 0; i < cacheSize; ++i)
   {
     int threadsX = (cacheChunk + params.threads.x - 1) / params.threads.x;
 // printf("run_CPUrsGPUwsConflDetect pos %i/%zu cpuRSetCache = %i wsetGPUcache = %i\n", i, cacheSize, (int)cpuRSetCache[i], (int)wsetGPUcache[i]);
-    if (cpuRSetCache[i] == batchCount && wsetGPUcache[i] == batchCount)
+    int inCPURSet;
+    int inGPUWSet;
+#ifdef BMAP_ENC_1BIT
+    inCPURSet = BMAP_CHECK_POS(cpuRSetCache, i, batchCount);
+    inGPUWSet = BMAP_CHECK_POS(wsetGPUcache, i, batchCount);
+#else /* BMAP_ENC_1BIT */
+    inCPURSet = (cpuRSetCache[i] == batchCount);
+    inGPUWSet = (wsetGPUcache[i] == batchCount);
+#endif /* BMAP_ENC_1BIT */
+    if (inCPURSet && inGPUWSet)
     {
       dim3 blocks(threadsX, params.blocks.y, params.blocks.z);
       dim3 threads(params.threads.x, params.threads.y, params.threads.z);

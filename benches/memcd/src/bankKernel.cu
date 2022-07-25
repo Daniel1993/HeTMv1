@@ -13,11 +13,12 @@
 #include <time.h>
 #include <math.h>
 
+#include "hetm-log.h"
 #include "bankKernel.cuh"
-#include "bitmap.h"
+#include "bitmap.hpp"
 
 #include "pr-stm-wrapper.cuh" // enables the granularity
-#include "pr-stm-internal.cuh"
+#include "setupKernels.cuh"
 
 #define INTEREST_RATE 0.5 // bank readIntensive transaction
 #define FULL_MASK 0xffffffff
@@ -60,6 +61,7 @@ __constant__ __device__ int PR_maxNbRetries = 16;
 __device__ void random_Kernel(PR_txCallDefArgs, int *idx, int size, int is_intersection)
 {
 	int i = 0;
+	int devId = args.devId;
 
 #if BANK_PART == 1
 	// break the dataset in CPU/GPU
@@ -69,32 +71,33 @@ __device__ void random_Kernel(PR_txCallDefArgs, int *idx, int size, int is_inter
 	int randVal = PR_rand(INT_MAX);
 #if BANK_PART == 1
 	if (is_intersect) {
-		idx[i] = INTERSECT_ACCESS_GPU(randVal, (size-BANK_NB_TRANSFERS-1));
+		idx[i] = INTERSECT_ACCESS_GPU(devId, randVal, (size-BANK_NB_TRANSFERS-1));
 	} else {
-		idx[i] = GPU_ACCESS(randVal, (size-BANK_NB_TRANSFERS-1));
+		idx[i] = GPU_ACCESS(devId, randVal, (size-BANK_NB_TRANSFERS-1));
 	}
 #elif BANK_PART == 2
-	int is_hot = IS_ACCESS_H(randVal, hprob);
+	int is_hot = IS_ACCESS_H(devId, randVal, hprob);
 	randVal = PR_rand(INT_MAX);
 	if (is_hot) {
-		idx[i] = GPU_ACCESS_H(randVal, hmult, size);
+		idx[i] = GPU_ACCESS_H(devId, randVal, hmult, size);
 	} else {
-		idx[i] = GPU_ACCESS_M(randVal, hmult, size);
+		idx[i] = GPU_ACCESS_M(devId, randVal, hmult, size);
 	}
 #else
-	idx[i] = INTERSECT_ACCESS_GPU(randVal, (size-BANK_NB_TRANSFERS-1));
+	idx[i] = INTERSECT_ACCESS_GPU(devId, randVal, (size-BANK_NB_TRANSFERS-1));
 #endif
 
 	// TODO: accounts are consecutive
 	// generates the target accounts for the transaction
 	for (i = 1; i < BANK_NB_TRANSFERS; i++) {
-		idx[i] = (idx[i-1] + 1) % GPU_TOP_IDX(size);
+		idx[i] = (idx[i-1] + 1) % GPU_TOP_IDX(devId, size);
 	}
 }
 
 __device__ void random_KernelReadIntensive(PR_txCallDefArgs, int *idx, int size, int is_intersection)
 {
 	int i = 0;
+	int devId = args.devId;
 
 #if BANK_PART == 1
 	// break the dataset in CPU/GPU
@@ -104,24 +107,24 @@ __device__ void random_KernelReadIntensive(PR_txCallDefArgs, int *idx, int size,
 	int randVal = PR_rand(INT_MAX);
 #if BANK_PART == 1
 	if (is_intersect) {
-		idx[i] = INTERSECT_ACCESS_GPU(randVal, (size-10*BANK_NB_TRANSFERS-1));
+		idx[i] = INTERSECT_ACCESS_GPU(devId, randVal, (size-10*BANK_NB_TRANSFERS-1));
 	} else {
-		idx[i] = GPU_ACCESS(randVal, (size-10*BANK_NB_TRANSFERS-1));
+		idx[i] = GPU_ACCESS(devId, randVal, (size-10*BANK_NB_TRANSFERS-1));
 	}
 #elif BANK_PART == 2
 	int is_hot = IS_ACCESS_H(randVal, hprob);
 	randVal = PR_rand(INT_MAX);
 	if (is_hot) {
-		idx[i] = GPU_ACCESS_H(randVal, hmult, size);
+		idx[i] = GPU_ACCESS_H(devId, randVal, hmult, size);
 	} else {
-		idx[i] = GPU_ACCESS_M(randVal, hmult, size);
+		idx[i] = GPU_ACCESS_M(devId, randVal, hmult, size);
 	}
 #else
-	idx[i] = INTERSECT_ACCESS_GPU(randVal, (size-10*BANK_NB_TRANSFERS-1));
+	idx[i] = INTERSECT_ACCESS_GPU(devId, randVal, (size-10*BANK_NB_TRANSFERS-1));
 #endif
 
 	for (i = 1; i < BANK_NB_TRANSFERS*10; i++) {
-		idx[i] = (idx[i-1] + 1) % GPU_TOP_IDX(size);
+		idx[i] = (idx[i-1] + 1) % GPU_TOP_IDX(devId, size);
 	}
 }
 

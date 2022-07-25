@@ -239,7 +239,8 @@ jobWithCuda_getStats(
   cudaError_t cudaStatus;
   int err = 1;
 
-  while(err) {
+  while(err)
+  {
     err = 0;
 
     PR_global_data_s *d;
@@ -261,8 +262,6 @@ jobWithCuda_getStats(
         *com += d->PR_nbCommits;
       }
     }
-
-
   }
 
   if (cudaStatus != cudaSuccess) {
@@ -332,7 +331,7 @@ offloadBankTxThread(
   bankTx_args->knlArgs.d = d;
   bankTx_args->knlArgs.a = a;
   bankTx_args->clbkArgs = NULL;
-  m_bankTx->CpyHtD(NULL); // TODO: this copy is not necessary
+  // m_bankTx->CpyHtD(NULL); // TODO: this copy is not necessary
 
   HeTM_bankTx->Run(devId);
 }

@@ -5,8 +5,11 @@
 #include <math.h>
 
 #include "graph.h"
+#define PRINT_GRAPH 0
 
+#if PRINT_GRAPH
 static int alreadyPrinted = 0;
+#endif
 
 static void
 tarjanAllocG(graph G, int inPlace);
@@ -28,6 +31,60 @@ allocG(long v, long e)
   return G;
 }
 
+graph
+extractSCC(graph G, int *sccList, int lenScc)
+{
+  int *p = sccList, *ptr, *o, *i;
+  int it = 0;
+  int *translate, *d;
+  int *invTranslate = G->d;
+  int countE = 0;
+  graph G1;
+  translate = d = (int*)malloc(lenScc*sizeof(int));
+#ifndef NDEBUG
+  memset(invTranslate, -1, sizeof(invTranslate));
+#endif
+  while (it < lenScc)
+  {
+    invTranslate[*p] = it;
+    *d = *p;
+    // printf("%i -> %i\n", it, *p);
+    assert(-1 != invTranslate[*p] && "invalid vertex in SCC");
+    o = G->E[*p][out];
+    while (-1 != *o) { countE++; o++; }
+    d++; p++; it++;
+  }
+  G1 = allocG(lenScc, countE);
+  G1->d = translate;
+  ptr = malloc(2*(lenScc+countE+1)*sizeof(int));
+  p = sccList;
+  it = 0;
+  while (it < lenScc)
+  {
+    /* handle out vertices */
+    o = G->E[*p][out];
+    G1->E[invTranslate[*p]][out] = ptr;
+    while (-1 != *o)
+    {
+      assert(-1 != invTranslate[*o] && "invalid vertex in SCC adjacency list");
+      *ptr = invTranslate[*o]; ptr++; o++;
+    }
+    *ptr = -1; ptr++;
+
+    /* handle in vertices */
+    i = G->E[*p][in];
+    G1->E[invTranslate[*p]][in] = ptr;
+    while (-1 != *i)
+    {
+      assert(-1 != invTranslate[*i] && "invalid vertex in SCC adjacency list");
+      *ptr = invTranslate[*i]; ptr++; i++;
+    }
+    *ptr = -1; ptr++;
+    p++; it++;
+  }
+  return G1;
+}
+
 void
 freeG(graph G)
 {
@@ -39,11 +96,10 @@ freeG(graph G)
 }
 
 // matrix accessed via idx_row*nbVertices+idx_col
-// TODO: add weights
 graph
 fromSquareMat(long nbVertices, unsigned char *mat)
 {
-  int edgeEstimate = nbVertices*nbVertices-nbVertices;
+  int edgeEstimate = nbVertices;
   graph G;
 
   int (*E)[2] = (int (*)[2])malloc(edgeEstimate*2*sizeof(int*));
@@ -56,18 +112,14 @@ fromSquareMat(long nbVertices, unsigned char *mat)
         E[countE][in]  = j;
         assert(E[countE][out] != E[countE][in] && "Loop node in input");
         countE++;
-        // now the estimate is the maximum possible number of edges
-        // if (countE > edgeEstimate) {
-        //   edgeEstimate <<= 1;
-        //   E = realloc(E, edgeEstimate*2*sizeof(int*));
-        // }
+        if (countE > edgeEstimate) {
+          edgeEstimate <<= 1;
+          E = realloc(E, edgeEstimate*2*sizeof(int*));
+        }
       }
     }
   }
   G = allocG(nbVertices, countE);
-
-  G->t = NULL;
-  G->d = NULL;
 
   /* Count Sort for packing */
   int *c = calloc(2*G->v, sizeof(int)); /* Clean-up */
@@ -112,6 +164,101 @@ fromSquareMat(long nbVertices, unsigned char *mat)
   return G;
 }
 
+graph
+loadG(FILE *stream)
+{
+  graph G = (graph) malloc(sizeof(struct graph_));
+  int weights, i, countEdges = 0, countVerts = 0;
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t read;
+
+  while ((read = getline(&line, &len, stream)) != -1)
+    if (line[0] != '%')
+      break;
+  
+  sscanf(line, "%ld %ld %d\n", &(G->v), &(G->e), &weights);
+  // assert(weights == 0);
+  
+  G->t = NULL;
+
+  G->E = malloc(G->v*2*sizeof(int *));
+
+  int (*E)[2] = (int (*)[2])malloc(G->e*2*sizeof(int));
+
+  while ((read = getline(&line, &len, stream)) != -1) {
+    if (line[0] == '%') continue; // ignore
+    if (line[0] == '\n') 
+    {
+      countVerts++;
+      continue; // ignore
+    }
+    // fprintf(stderr, "before strtok 1\n");
+    char *vert = strtok(line, " ");
+    // fprintf(stderr, "after strtok 1\n");
+    int adjV;
+    while (vert != NULL && vert[0] != '\n') {
+      assert(countEdges < G->e && "The number of edges does not match input");
+      // fprintf(stderr, "before atoi 1\n");
+      adjV = atoi(vert);
+      // fprintf(stderr, "after atoi 1\n");
+      E[countEdges][out] = countVerts;
+      E[countEdges][in] = adjV-1;
+      assert(E[countEdges][out] != E[countEdges][in] && "Loop node in input");
+      assert(E[countEdges][out] >= 0 && E[countEdges][out] < G->v && "Invalid vertex ID");
+      assert(E[countEdges][ in] >= 0 && E[countEdges][ in] < G->v && "Invalid vertex ID");
+      // fprintf(stderr, "before strtok 3\n");
+      vert = strtok(NULL, " ");
+      // fprintf(stderr, "after strtok 3\n");
+      countEdges++;
+    }
+    countVerts++;
+  }
+  assert(countEdges == G->e && "The number of edges does not match input");
+  assert(countVerts == G->v && "The number of vertices does not match input");
+
+  /* Count Sort for packing */
+  int *c = calloc(2*G->v, sizeof(int)); /* Clean-up */
+  for(int i=0; i<G->e; i++){ /* Count */
+    c[out+2*E[i][out]]++;
+    c[in+2*E[i][in]]++;
+  }
+
+  /* Pointer */
+  int *p = malloc(2*(G->v+G->e)*sizeof(int));
+  for(i=0; i<2*G->v; i++){ /* Acc */
+    p += c[i];
+    if(out == i%2)
+      G->E[i/2][out] = p;
+    else
+      G->E[i/2][in] = p;
+    *p = -1; /* Add terminator */
+    p++;
+  }
+  free(c);
+
+  G->outDeg = (int*)calloc(G->v, sizeof(int));
+  G->inDeg = (int*)calloc(G->v, sizeof(int));
+  for(i=0; i<G->e; i++){ /* Transfer */
+    G->E[E[i][out]][out]--;
+    *(G->E[E[i][out]][out])=E[i][in];
+    G->outDeg[E[i][out]]++;
+    G->E[E[i][in]][in]--;
+    *(G->E[E[i][in]][in])=E[i][out];
+    G->inDeg[E[i][in]]++;
+  }
+#ifndef NDEBUG
+  for (i = 0; i < G->v; i++) {
+    assert(G->inDeg[i] == degree(G, i, in));
+    assert(G->outDeg[i] == degree(G, i, out));
+  }
+#endif
+  free(E);
+
+  return G;
+}
+
+#if PRINT_GRAPH
 graph
 loadG(FILE *stream)
 {
@@ -182,6 +329,7 @@ loadG(FILE *stream)
 
   return G;
 }
+#endif
 
 void
 printG(graph G)
@@ -338,8 +486,10 @@ static __thread graph tmp_G;
 static int
 score(graph G, int v)
 {
-  return G->inDeg[v]*G->outDeg[v];
+  // return G->inDeg[v]*G->outDeg[v]; // executes slow
+  return G->inDeg[v]==0||G->outDeg[v]==0 ? 0 : G->inDeg[v]+G->outDeg[v];
 }
+
 static int
 pcmp(const void *p1, const void *p2)
 {

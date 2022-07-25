@@ -4,22 +4,10 @@
 #define HTM_SGL_INIT_BUDGET 10
 
 #include "htm_retry_template.h"
-#include "hetm-log.h"
 #include "rdtsc.h"
+#include "hetm-log.h"
 
-#ifndef MAX_THREADS
-#define MAX_THREADS 128 // TODO: used somewhere else
-#endif
-#define HETM_BUFFER_MAXSIZE 128
-
-extern __thread HETM_LOG_T *HeTM_log;
-extern __thread void* volatile HeTM_bufAddrs[HETM_BUFFER_MAXSIZE];
-extern __thread uintptr_t HeTM_bufVal[HETM_BUFFER_MAXSIZE];
-extern __thread uintptr_t HeTM_bufVers[HETM_BUFFER_MAXSIZE];
-extern __thread uintptr_t HeTM_version;
-extern __thread size_t HeTM_ptr;
-extern __thread uint64_t HeTM_htmRndSeed;
-extern int errors[MAX_THREADS][HTM_NB_ERRORS];
+extern int errors[HETM_MAX_THREADS][HTM_NB_ERRORS];
 
 // updates the statistics
 #undef HTM_INC
@@ -41,6 +29,7 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
 #undef BEFORE_TRANSACTION
 #define BEFORE_TRANSACTION(tid, budget) \
   HeTM_ptr = 0; \
+  HeTM_ptr_reads = 0; \
 //
 
 #undef BEFORE_COMMIT
@@ -52,8 +41,13 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
 #ifdef HETM_INSTRUMENT_CPU
 #define AFTER_TRANSACTION(tid, budget) ({ \
   uintptr_t i; \
-  for (i = 0; i < (uintptr_t)HeTM_ptr; ++i) { \
+  for (i = 0; i < HeTM_ptr; ++i) { \
+    /* printf("HeTM_bufAddrs[HeTM_ptr]=%p\n", HeTM_bufAddrs[i]); */\
     stm_log_newentry(HeTM_log, (long*)HeTM_bufAddrs[i], HeTM_bufVal[i], HeTM_version); \
+  } \
+  for (i = 0; i < HeTM_ptr_reads; ++i) { \
+    /* printf("HeTM_bufAddrs_reads[HeTM_ptr_reads]=%p\n", HeTM_bufAddrs_reads[i]); */\
+    stm_log_read_entry((long*)HeTM_bufAddrs_reads[i]); \
   } \
 })
 #else
@@ -63,7 +57,7 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
 #undef HTM_SGL_after_write
 #ifdef HETM_INSTRUMENT_CPU
 #define HTM_SGL_after_write(addr, val) ({ \
-  GRANULE_TYPE _val = (val); \
+  uintptr_t _val = (val); \
   HeTM_bufAddrs[HeTM_ptr] = addr; \
   HeTM_bufVal[HeTM_ptr]   = (uintptr_t)_val; \
   /*HeTM_bufVers[HeTM_ptr]  = 0;*/ \
@@ -72,6 +66,18 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
 //
 #else
 #define HTM_SGL_after_write(addr, val) /* empty */
+#endif
+
+#undef HTM_SGL_before_read
+#ifdef HETM_INSTRUMENT_CPU
+#define HTM_SGL_before_read(addr) ({ \
+  HeTM_bufAddrs_reads[HeTM_ptr_reads] = addr; \
+  /*HeTM_bufVers[HeTM_ptr]  = 0;*/ \
+  HeTM_ptr_reads++; \
+}) \
+//
+#else
+#define HTM_SGL_before_read(addr) /* empty */
 #endif
 
 #undef AFTER_SGL_BEGIN
@@ -83,9 +89,6 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
 #define HTM_SGL_exit_thr() ({ HTM_thr_exit(); if (HeTM_log != NULL) { stm_log_free(HeTM_log); HeTM_log = NULL; } })
 
 #define HeTM_get_log(ptr) ({ *(HeTM_CPULogNode_t **)ptr = stm_log_read(HeTM_log); })
-
-#undef HTM_SGL_before_read
-#define HTM_SGL_before_read(addr) /* empty */
 
 #undef AFTER_ABORT
 #define AFTER_ABORT(tid, budget, status) ({ \

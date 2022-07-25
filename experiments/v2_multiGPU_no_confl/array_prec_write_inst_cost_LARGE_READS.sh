@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DURATION=5000
+DURATION=30000
 SAMPLES=1
 
 rm -f Bank.csv

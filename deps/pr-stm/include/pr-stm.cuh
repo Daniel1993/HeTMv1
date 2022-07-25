@@ -62,6 +62,7 @@
 // This is in pr-stm-internal.cuh (Do not call it!)
 #define PR_globalVars \
 	__thread int PR_curr_dev = 0; \
+	int PR_enable_auto_stats = 0; \
 	PR_global_data_s PR_global[PR_MAX_DEVICES]; \
 //
 
@@ -113,6 +114,7 @@ typedef struct PR_global_data_ {
 	cudaEvent_t PR_eventKernelStop;
 } PR_global_data_s;
 
+extern int PR_enable_auto_stats;
 extern __thread int PR_curr_dev;
 extern PR_global_data_s PR_global[PR_MAX_DEVICES];
 

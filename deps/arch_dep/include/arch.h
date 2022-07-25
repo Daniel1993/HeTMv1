@@ -160,36 +160,36 @@
 #define CL_ALIGN __attribute__((aligned(CACHE_LINE_SIZE)))
 #define CL_DISTANCE(type) CACHE_LINE_SIZE / sizeof(type)
 
-#ifndef GRANULE_TYPE
-#define GRANULE_TYPE intptr_t
+#ifndef ARCH_GRANULE_TYPE
+#define ARCH_GRANULE_TYPE intptr_t
 #endif /* GRANULE_TYPE */
 
-#ifndef GRANULE_P_TYPE
-#define GRANULE_P_TYPE intptr_t*
+#ifndef ARCH_GRANULE_P_TYPE
+#define ARCH_GRANULE_P_TYPE intptr_t*
 #endif /* GRANULE_P_TYPE */
 
-#ifndef GRANULE_D_TYPE
-#define GRANULE_D_TYPE double
+#ifndef ARCH_GRANULE_D_TYPE
+#define ARCH_GRANULE_D_TYPE double
 #endif /* GRANULE_D_TYPE */
 
 // #############################
 // ### GRANULE OPERATIONS ######
 // #############################
 typedef union convert_types_ {
-	GRANULE_D_TYPE d;
-	GRANULE_P_TYPE p;
-	GRANULE_TYPE g;
+	ARCH_GRANULE_D_TYPE d;
+	ARCH_GRANULE_P_TYPE p;
+	ARCH_GRANULE_TYPE g;
 } convert_types_u;
 
 #define CONVERT_GRANULE_D(val) ({ \
 	convert_types_u u; \
-	u.d = (GRANULE_D_TYPE) val; \
+	u.d = (ARCH_GRANULE_D_TYPE) val; \
 	u.g; \
 })
 
 #define CONVERT_GRANULE_P(val) ({ \
 	convert_types_u u; \
-	u.p = (GRANULE_P_TYPE) val; \
+	u.p = (ARCH_GRANULE_P_TYPE) val; \
 	u.g; \
 })
 // #############################

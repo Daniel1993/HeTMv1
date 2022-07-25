@@ -6,7 +6,7 @@
 typedef struct state_ *state;
 
 void
-BB_resetS(state s, graph G
+BB_resetS(state s
        );
 
 state

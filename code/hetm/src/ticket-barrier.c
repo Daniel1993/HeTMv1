@@ -37,6 +37,7 @@ static inline long sys_futex(void *addr1, int op, int val1, struct timespec *tim
 
 void ticket_barrier_init(ticket_barrier_t *b, unsigned count)
 {
+	b->is_stop = 0;
 	b->count_in = 0;
 	b->count_out = 0;
 	b->count_next = -1;
@@ -47,6 +48,7 @@ void ticket_barrier_destroy(ticket_barrier_t *b)
 {
 	/* Alter the refcount so we trigger futex wake */
 	ticket_barrier_reset(b);
+	__atomic_store_n(&b->is_stop, 1, __ATOMIC_RELEASE);
 	atomic_add(&b->count_in, -1);
 
 	/* However, threads can be leaving... so wait for them */
@@ -71,7 +73,7 @@ int ticket_barrier_cross(ticket_barrier_t *b)
 
 	int ret;
 
-	while (1)
+	while (!__atomic_load_n(&b->is_stop, __ATOMIC_ACQUIRE))
 	{
 		next = atomic_read(b->count_next);
 
@@ -123,6 +125,7 @@ int ticket_barrier_reset(ticket_barrier_t *b)
 {
 	atomic_add(&b->count_in, b->total);
 	atomic_add(&b->reset, 1ULL << 32);
+	b->is_stop = 1;
 	b->count_next += b->total;
 	__sync_synchronize();
 }

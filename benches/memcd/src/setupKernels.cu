@@ -1,7 +1,23 @@
+#include "hetm-log.h"
+
 #include "setupKernels.cuh"
 #include "cmp_kernels.cuh"
 #include "bankKernel.cuh"
 #include "bank.hpp"
+
+#include "memman.hpp"
+
+using namespace memman;
+using namespace knlman;
+
+KnlObj *HeTM_finalTxLog2;
+KnlObj *HeTM_bankTx;
+KnlObj *HeTM_memcdWriteTx;
+KnlObj *HeTM_memcdReadTx;
+MemObjOnDev HeTM_bankTxEntryObj;
+MemObjOnDev HeTM_bankTxInput;
+MemObjOnDev HeTM_memcdTx_input;
+MemObjOnDev memcd_global_ts;
 
 static void run_memcdReadTx(knlman_callback_params_s params);
 static void run_memcdWriteTx(knlman_callback_params_s params);
@@ -9,20 +25,43 @@ static void run_finalTxLog2(knlman_callback_params_s params);
 
 int HeTM_setup_memcdWriteTx(int nbBlocks, int nbThreads)
 {
-  PR_blockNum = nbBlocks;
-  PR_threadNum = nbThreads;
-  knlman_create("HeTM_memcdWriteTx", run_memcdWriteTx, 0);
-
-  memman_alloc_dual("HeTM_memcdTx_input", sizeof(HeTM_memcdTx_input_s), 0);
-  // memman_alloc_gpu("HeTM_memcdTx_output", sizeof(HeTM_memcdTx_input_s), 0);
+  PR_global_data_s *d;
+  for (int j = 0; j < Config::GetInstance()->NbGPUs(); j++)
+  {
+    MemObjBuilder b;
+    Config::GetInstance()->SelDev(j);
+    PR_curr_dev = j;
+    d = &(PR_global[PR_curr_dev]);
+    d->PR_blockNum = nbBlocks;
+    d->PR_threadNum = nbThreads;
+    HeTM_memcdTx_input.AddMemObj(new MemObj(b
+      .SetOptions(0)
+      ->SetSize(sizeof(HeTM_memcdTx_input_s))
+      ->AllocDevPtr()
+      ->AllocHostPtr(),
+      j
+    ));
+  }
+  KnlObjBuilder b;
+  HeTM_memcdWriteTx = new KnlObj(b
+    .SetCallback(run_memcdWriteTx)
+    ->SetEntryObj(&HeTM_memcdTx_input));
   return 0;
 }
 
-int x(int nbBlocks, int nbThreads)
+int HeTM_setup_memcdReadTx(int nbBlocks, int nbThreads)
 {
-  PR_blockNum = nbBlocks;
-  PR_threadNum = nbThreads;
-  knlman_create("HeTM_memcdReadTx", run_memcdReadTx, 0);
+  PR_global_data_s *d;
+  for (int j = 0; j < HETM_NB_DEVICES; j++) {
+    PR_curr_dev = j;
+    d = &(PR_global[PR_curr_dev]);
+    d->PR_blockNum = nbBlocks;
+    d->PR_threadNum = nbThreads;
+  }
+  KnlObjBuilder b;
+  HeTM_memcdReadTx = new KnlObj(b
+    .SetCallback(run_memcdReadTx)
+    ->SetEntryObj(&HeTM_memcdTx_input));
 
   // already set-up HeTM_memcdTx_input
 
@@ -31,10 +70,11 @@ int x(int nbBlocks, int nbThreads)
 
 int HeTM_bankTx_cpy_IO() // TODO: not used
 {
-  for (int j = 0; HETM_NB_DEVICES; ++j) {
-    memman_select_device(j);
-    pr_tx_args_s *pr_args = getPrSTMmetaData(j);
+  for (int j = 0; j < Config::GetInstance()->NbGPUs(); ++j)
+  {
+    Config::GetInstance()->SelDev(j);
     PR_curr_dev = j;
+    pr_tx_args_s *pr_args = getPrSTMmetaData(j);
     PR_retrieveIO(pr_args);
   }
   return 0;
@@ -42,35 +82,34 @@ int HeTM_bankTx_cpy_IO() // TODO: not used
 
 int HeTM_teardown_bankTx()
 {
-  knlman_select("HeTM_bankTx");
-  knlman_destroy();
+  delete HeTM_bankTx;
   return 0;
 }
 
 int HeTM_teardown_memcdWriteTx()
 {
-  knlman_select("HeTM_memcdWriteTx");
-  knlman_destroy();
+  delete HeTM_memcdWriteTx;
   return 0;
 }
 
 int HeTM_teardown_memcdReadTx()
 {
-  knlman_select("HeTM_memcdReadTx");
-  knlman_destroy();
-  return 0;
+  delete HeTM_memcdReadTx;
+  return 0; 
 }
 
 int HeTM_setup_finalTxLog2()
 {
-  knlman_create("HeTM_finalTxLog2", run_finalTxLog2, 0);
+  KnlObjBuilder b;
+  HeTM_finalTxLog2 = new KnlObj(b
+    .SetCallback(run_finalTxLog2));
   return 0;
 }
 
 int HeTM_teardown_finalTxLog2()
 {
-  knlman_select("HeTM_finalTxLog2");
-  knlman_destroy();
+  // TODO: delete entryObj
+  delete HeTM_finalTxLog2;
   return 0;
 }
 
@@ -97,8 +136,9 @@ static void run_memcdReadTx(knlman_callback_params_s params)
 
   // thread_local static unsigned short seed = 1234;
 
-  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
-    memman_select_device(j);
+  for (int j = 0; j < HETM_NB_DEVICES; ++j)
+  {
+    Config::GetInstance()->SelDev(j);
     PR_curr_dev = j;
 
     CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
@@ -113,9 +153,8 @@ static void run_memcdReadTx(knlman_callback_params_s params)
       d->dev_b = accounts;
     }
 
-    memman_select("HeTM_memcdTx_input");
-    input = (HeTM_memcdTx_input_s*)memman_get_cpu(NULL);
-    inputDev = (HeTM_memcdTx_input_s*)memman_get_gpu(NULL);
+    input = (HeTM_memcdTx_input_s*)HeTM_memcdTx_input.GetMemObj(j)->host;
+    inputDev = (HeTM_memcdTx_input_s*)HeTM_memcdTx_input.GetMemObj(j)->dev;
 
     input->key      = d->dev_a;
     // TODO: /sizeof(...)
@@ -132,11 +171,9 @@ static void run_memcdReadTx(knlman_callback_params_s params)
     input->input_vals = GPUInputBuffer[j];
     input->output     = (memcd_get_output_t*)GPUoutputBuffer[j];
 
-    memman_select("memcd_global_ts");
-    input->curr_clock = (int*)memman_get_gpu(NULL);
+    input->curr_clock = (int*)memcd_global_ts.GetMemObj(j)->dev;
 
-    memman_select("HeTM_memcdTx_input");
-    memman_cpy_to_gpu(HeTM_memStream2[j], NULL, *hetm_batchCount[j]);
+    HeTM_memcdTx_input.GetMemObj(j)->CpyHtD(HeTM_memStream2[j]);
 
     // TODO:
     // inputDev = (HeTM_memcdTx_input_s*)memman_ad_hoc_alloc(NULL, &input, sizeof(HeTM_memcdTx_input_s));
@@ -164,7 +201,8 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   pr_buffer_s inBuf, outBuf;
   HeTM_memcdTx_input_s *input, *inputDev;
 
-  for (j = 0; j < HETM_NB_DEVICES; ++j) {
+  for (int j = 0; j < HETM_NB_DEVICES; ++j)
+  {
     cudaFuncSetCacheConfig(memcdWriteTx, cudaFuncCachePreferL1);
 
     if (a == NULL) {
@@ -174,9 +212,8 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
       d->dev_b = accounts;
     }
 
-    memman_select("HeTM_memcdTx_input");
-    input = (HeTM_memcdTx_input_s*)memman_get_cpu(NULL);
-    inputDev = (HeTM_memcdTx_input_s*)memman_get_gpu(NULL);
+    input = (HeTM_memcdTx_input_s*)HeTM_memcdTx_input.GetMemObj(j)->host;
+    inputDev = (HeTM_memcdTx_input_s*)HeTM_memcdTx_input.GetMemObj(j)->dev;
 
     input->key   = d->dev_a;
     input->extraKey = input->key + (d->memcd_nbSets*d->memcd_nbWays);
@@ -192,11 +229,9 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
     input->input_vals = GPUInputBuffer[j];
     input->output     = (memcd_get_output_t*)GPUoutputBuffer[j];
 
-    memman_select("memcd_global_ts");
-    input->curr_clock = (int*)memman_get_gpu(NULL);
 
-    memman_select("HeTM_memcdTx_input");
-    memman_cpy_to_gpu(HeTM_memStream2[j], NULL, *hetm_batchCount[j]);
+    input->curr_clock = (int*)memcd_global_ts.GetMemObj(j)->dev;
+    HeTM_memcdTx_input.GetMemObj(j)->CpyHtD(HeTM_memStream2[j]);
 
     // TODO: change PR-STM to use knlman
     // PR_blockNum = params.blocks.x;

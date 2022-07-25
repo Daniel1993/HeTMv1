@@ -41,12 +41,14 @@ void bank_part9_init()
 
 		rnd = RAND_R_FNC(input_seed);
 		for (int i = 0; i < buffer_last; ++i) {
-			if (i % 512 == 0) {
-				cpu_ptr[i] = 0; // deterministic intersection
-				continue;
-			}
 			unsigned cnfl_rnd = RAND_R_FNC(input_seed);
 			unsigned pos = RAND_R_FNC(input_seed);
+			if (i % 128 == 0) {
+				cpu_ptr[i] = INTERSECT_ACCESS(rnd, parsedData.nb_accounts-20);
+				rnd++;
+				// cpu_ptr[i] = i%128; // deterministic intersection
+				continue;
+			}
 #if BANK_INTRA_CONFL > 0
 			// no conflict
 			if (cnfl_rnd % 100 >= BANK_INTRA_CONFL*100)
@@ -89,12 +91,14 @@ void bank_part9_init()
 	reset_rnd = RAND_R_FNC(input_seed);
 	rnd = reset_rnd;
 	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
-		if (i % 128 == 0) {
-			CPUInputBuffer[i] = 0; // deterministic intersection
-			continue;
-		}
 		unsigned cnfl_rnd = RAND_R_FNC(input_seed);
 		unsigned pos = RAND_R_FNC(input_seed);
+		if (i % 128 == 0) {
+			CPUInputBuffer[i] = INTERSECT_ACCESS(rnd, parsedData.nb_accounts-20);
+			rnd++;
+			// CPUInputBuffer[i] = i%128; // deterministic intersection
+			continue;
+		}
 #if BANK_INTRA_CONFL > 0
 		// no conflict
 		if (cnfl_rnd % 100 >= BANK_INTRA_CONFL*100)
@@ -136,8 +140,10 @@ void bank_part9_cpu_run(int id, thread_data_t *d)
 
 		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
 			// 1% readIntensive
+			// printf("readIntensive\n");
 			readIntensive(accounts, accounts_vec, d->read_intensive_size, 1);
 		} else {
+			// printf("readOnly\n");
 			resReadOnly += readOnly(accounts, accounts_vec, d->read_intensive_size, 1);
 		}
 	} else {
@@ -147,9 +153,11 @@ void bank_part9_cpu_run(int id, thread_data_t *d)
 			accounts_vec[i] = accounts_vec[i-1]+1;
 		}
 		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
+			// printf("transfer2\n");
 			transfer2(accounts, accounts_vec, isInterBatch, d->read_intensive_size, id, nb_accounts);
 		} else {
 			// resReadOnly += transferReadOnly(accounts, accounts_vec, d->trfs, 1);
+			// printf("readOnly2\n");
 			resReadOnly += readOnly2(accounts, accounts_vec, isInterBatch, d->read_intensive_size, id, nb_accounts);
 		}
 	}
@@ -157,21 +165,28 @@ void bank_part9_cpu_run(int id, thread_data_t *d)
 
 __device__ void bank_part9_gpu_run(int tid, PR_txCallDefArgs)
 {
-	__shared__ int rndVoteOption[32];
-	__shared__ int rndVoteOption2[32];
+	// __shared__ int rndVoteOption[32];
+	// __shared__ int rndVoteOption2[32];
 
 	int i = 0; //how many transactions one thread need to commit
 	// HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
 	int option;
 	int option2;
 
-	if (threadIdx.x % 32 == 0) {
-		rndVoteOption[threadIdx.x / 32] = PR_rand(INT_MAX);
-		rndVoteOption2[threadIdx.x / 32] = PR_rand(INT_MAX);
-	}
+	// if (threadIdx.x % 32 == 0) {
+	// 	rndVoteOption[threadIdx.x / 32] = PR_rand(INT_MAX);
+	// 	rndVoteOption2[threadIdx.x / 32] = PR_rand(INT_MAX);
+	// }
 	__syncthreads();
-	option = rndVoteOption[threadIdx.x / 32];
-	option2 = rndVoteOption2[threadIdx.x / 32];
+	// option = rndVoteOption[threadIdx.x / 32];
+	// option2 = rndVoteOption2[threadIdx.x / 32];
+	if (threadIdx.x % 32 == 0)
+	{
+		option = PR_rand(INT_MAX);
+		option2 = PR_rand(INT_MAX);
+	}
+	option = __shfl_sync(0xffffffff, option, 0);
+	option2 = __shfl_sync(0xffffffff, option2, 0);
 	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
 
 	for (i = 0; i < txsPerGPUThread; ++i) { // each thread need to commit x transactions
@@ -185,6 +200,7 @@ __device__ void bank_part9_gpu_run(int tid, PR_txCallDefArgs)
 			}
 		} else {
 			if (option2 % 100000000 < (devParsedData.prec_write_txs * 1000000)) {
+				// update_tx_simple(PR_txCallArgs, i);
 				update_tx2(PR_txCallArgs, i);
 			} else {
 				readOnly_tx2(PR_txCallArgs, i);

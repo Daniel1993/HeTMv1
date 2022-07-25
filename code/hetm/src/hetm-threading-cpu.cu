@@ -38,11 +38,10 @@ std::mutex HeTM_statsMutex; // extern in hetm-threading-gpu
 
 // thread_local static int inBackoff[HETM_NB_DEVICES];
 // thread_local static int nbCpyRounds[HETM_NB_DEVICES];
-thread_local static int doneWithCPUlog[HETM_NB_DEVICES];
+// thread_local static int doneWithCPUlog[HETM_NB_DEVICES];
 // thread_local static int awakeGPU[HETM_NB_DEVICES];
 
-static void dealWithDatasetSync();
-static void cpyCPUwrtsetToGPU(int nonBlock);
+static void dealWithDatasetSync(int isNonBlock);
 static void cpyBMAPtoGPU(int devId);
 // static void broadcastCPUdataset(int devId);
 static void cpyGPUmodificationsToCPU(int devId);
@@ -98,7 +97,7 @@ static int launchCPUGPUConflDetectKernel(int devId)
 
   // Memory region of the entry object
   // printf("dev = %i batchCount = %li\n", j, HeTM_shared_data[j].batchCount);
-  MemObj *m = HeTM_interGPUConflDetect->entryObj->GetMemObj(devId);
+  MemObj *m = HeTM_CPUGPUConflDetect->entryObj->GetMemObj(devId);
   HeTM_cmp_s *checkTxCompressed_args         = (HeTM_cmp_s*)m->host;
   checkTxCompressed_args->knlArgs.devId      = devId;
   checkTxCompressed_args->knlArgs.knlGlobal  = *(HeTM_get_global_arg(devId));
@@ -165,28 +164,26 @@ launchCPUrsGPUwsConflDetectKernel(
   return 0;
 }
 
-static void waitNextBatch(int nonBlock) // synchs with notifyCPUNextBatch in threading-gpu
+void waitNextBatch(int nonBlock) // synchs with notifyCPUNextBatch in threading-gpu
 {
-
   // __sync_synchronize();
   // printf("."); // TODO: TinySTM crashes if this is not here... why?!
   // fflush(stdout);
   NVTX_PUSH_RANGE("wait in CPU", NVTX_PROF_CPU_WAITS_NEXT_BATCH);
-  HETM_DEB_THRD_CPU(" -0- thread %i waits next batch\n", HeTM_thread_data[0]->id);
+  // HETM_DEB_THRD_CPU(" -0- thread %i waits next batch\n", HeTM_thread_data[0]->id);
   if (!nonBlock)
     HeTM_sync_next_batch();
 
-  dealWithDatasetSync();
+  if (!HeTM_is_stop())
+    dealWithDatasetSync(nonBlock);
 
-  for (int i = 0; i < HETM_NB_DEVICES; ++i)
-  {
-    Config::GetInstance()->SelDev(i);
-    CUDA_CHECK_ERROR(cudaDeviceSynchronize(), "");
-  }
-  HETM_DEB_THRD_CPU(" -1- thread %i waits next batch\n", HeTM_thread_data[0]->id);
+  // HETM_DEB_THRD_CPU(" -1- thread %i waits next batch\n", HeTM_thread_data[0]->id);
   if (!nonBlock)
     HeTM_sync_next_batch();
-  HETM_DEB_THRD_CPU(" -2- thread %i starts next batch\n", HeTM_thread_data[0]->id);
+  // GPU resets BMAPs
+  if (!nonBlock)
+    HeTM_sync_next_batch();
+  // HETM_DEB_THRD_CPU(" -2- thread %i starts next batch\n", HeTM_thread_data[0]->id);
   NVTX_POP_RANGE(); // NVTX_PROF_CPU_WAITS_NEXT_BATCH
 }
 
@@ -220,28 +217,12 @@ void resetInterGPUConflFlag()
 static void compareCPUrsAgainstAllGPUws()
 {
   int myId = HeTM_thread_data[0]->id;
+  int nbGPUs = Config::GetInstance()->NbGPUs();
 
-  for (int j = 0; j < HETM_NB_DEVICES; ++j)
+  for (int j = 0; j < nbGPUs; ++j)
   {
     if (j % HeTM_gshared_data.nbCPUThreads == myId)
       launchCPUrsGPUwsConflDetectKernel(j);
-  }
-}
-
-void checkCPUCmpDone(int devId)
-{
-  if (HeTM_thread_data[devId]->isCmpDone) {
-    // HETM_DEB_THRD_CPU("Thread %i CMP with GPU %i is done", HeTM_thread_data[devId]->id, devId);
-    // No limit for the number of rounds (TODO: no longer using HETM_CPU_INV)
-    if (HeTM_is_interconflict(devId)) {
-      if (!doneWithCPUlog[devId]) {
-        HETM_DEB_THRD_CPU("Thread %i CMP found conflict", HeTM_thread_data[devId]->id);
-        doneWithCPUlog[devId] = 1;
-        __sync_add_and_fetch(&HeTM_shared_data[devId].threadsWaitingSync, 1);
-      }
-      HeTM_thread_data[devId]->statusCMP = HETM_CMP_BLOCK;
-      __sync_synchronize();
-    }
   }
 }
 
@@ -300,19 +281,25 @@ cpyGPUmodificationsToCPU(
   PR_curr_dev = devId;
   Config::GetInstance()->SelDev(devId);
 
+  MemObj *m_gpu_wset_cache = HeTM_gpu_wset_cache.GetMemObj(devId);
+  MemObj *m_cpu_wset_cache = HeTM_cpu_wset_cache.GetMemObj(devId);
+  MemObj *m_gpu_wset       = HeTM_gpu_wset.GetMemObj(devId);
+  MemObj *m_mempool        = HeTM_mempool.GetMemObj(devId);
+
   MemObjCpyBuilder b;
   MemObjCpyDtH m(b
     .SetGranFilter(8) // TODO
     ->SetGranApply(sizeof(PR_GRANULE_T))
-    ->SetForceFilter(1)
+    ->SetForceFilter(MEMMAN_FILTER|MEMMAN_ON_COLLISION)
     ->SetFilterVal(HeTM_gshared_data.batchCount)
-    ->SetCache(HeTM_gpu_wset_cache.GetMemObj(devId))
-    ->SetFilter(HeTM_gpu_wset.GetMemObj(devId))
-    ->SetDst(HeTM_mempool.GetMemObj(devId))
-    ->SetSrc(HeTM_mempool.GetMemObj(devId))
+    ->SetCache(m_gpu_wset_cache)
+    ->SetCache2(m_cpu_wset_cache)
+    ->SetFilter(m_gpu_wset)
+    ->SetDst(m_mempool)
+    ->SetSrc(m_mempool)
     ->SetSizeChunk(BMAP_GRAN)
     ->SetStrm1(HeTM_memStream[devId])
-    ->SetStrm2(HeTM_memStream2[devId])
+    ->SetStrm2(HeTM_memStream[devId])
   );
   size_t cpySize = m.Cpy();
   __atomic_add_fetch(&HeTM_stats_data.sizeCpyDataset, cpySize, __ATOMIC_ACQ_REL);
@@ -327,18 +314,24 @@ cpyCPUmodificationsToGPU(
 
   HETM_DEB_THRD_GPU("Copy CPU modifications to GPU%i\n", devId);
 
+  MemObj *m_cpu_wset_cache = HeTM_cpu_wset_cache.GetMemObj(devId);
+  MemObj *m_gpu_wset_cache = HeTM_gpu_wset_cache.GetMemObj(devId);
+  MemObj *m_cpu_wset       = HeTM_cpu_wset.GetMemObj(devId);
+  MemObj *m_mempool        = HeTM_mempool.GetMemObj(devId);
+
   MemObjCpyBuilder b;
   MemObjCpyHtD m(b
     .SetGranFilter(8) // TODO
     ->SetGranApply(sizeof(PR_GRANULE_T))
-    ->SetForceFilter(1)
+    ->SetForceFilter(MEMMAN_FILTER|MEMMAN_ON_COLLISION)
     ->SetFilterVal(HeTM_gshared_data.batchCount)
-    ->SetCache(HeTM_cpu_wset_cache.GetMemObj(devId))
-    ->SetFilter(HeTM_cpu_wset.GetMemObj(devId))
-    ->SetDst(HeTM_mempool.GetMemObj(devId))
-    ->SetSrc(HeTM_mempool.GetMemObj(devId))
+    ->SetCache(m_cpu_wset_cache)
+    ->SetCache2(m_gpu_wset_cache)
+    ->SetFilter(m_cpu_wset)
+    ->SetDst(m_mempool)
+    ->SetSrc(m_mempool)
     ->SetSizeChunk(BMAP_GRAN)
-    ->SetStrm1(HeTM_memStream[devId])
+    ->SetStrm1(HeTM_memStream2[devId])
     ->SetStrm2(HeTM_memStream2[devId])
   );
   size_t cpySize = m.Cpy();
@@ -349,7 +342,8 @@ cpyCPUmodificationsToGPU(
 static void
 cpyModifications(
   int devDst,
-  int devSrc
+  int devSrc,
+  int idOverride
 ) {
   int nbGPUs = Config::GetInstance()->NbGPUs();
   int CPUid = nbGPUs;
@@ -368,23 +362,28 @@ cpyModifications(
   MemObj *m_dst_mempool = HeTM_mempool.GetMemObj(devDst);
   MemObj *m_src_mempool = HeTM_mempool.GetMemObj(devSrc);
   MemObj *m_src_wset_cache = HeTM_gpu_wset_cache.GetMemObj(devSrc);
-  MemObj *m_src_wset_filter = HeTM_gpu_wset_ext[devSrc*nbGPUs+devDst].GetMemObj(devDst);
+  MemObj *m_dst_wset_cache = HeTM_gpu_wset_cache.GetMemObj(devDst);
+  MemObj *m_src_wset_filter = HeTM_gpu_wset_ext[devSrc].GetMemObj(devDst);
+  int fltr = idOverride ? MEMMAN_NONE : MEMMAN_FILTER|MEMMAN_ON_COLLISION;
 
   MemObjCpyBuilder b;
   MemObjCpyDtD m(b
     .SetGranFilter(8) // TODO
     ->SetGranApply(sizeof(PR_GRANULE_T))
-    ->SetForceFilter(1)
+    ->SetForceFilter(fltr)
     ->SetFilterVal(HeTM_gshared_data.batchCount)
     ->SetCache(m_src_wset_cache)
+    ->SetCache2(m_dst_wset_cache)
     ->SetFilter(m_src_wset_filter)
     ->SetDst(m_dst_mempool)
     ->SetSrc(m_src_mempool)
-    ->SetSizeChunk(CHUNK_GRAN)
+    ->SetSizeChunk(BMAP_GRAN)
     ->SetStrm1(HeTM_memStream[devDst])
     ->SetStrm2(HeTM_memStream2[devDst])
   );
+
   size_t cpySize = m.Cpy();
+  // printf("Copied %zuB from GPU%i (%p) to GPU%i (%p)\n", cpySize, devSrc, m_src_mempool->dev, devDst, m_dst_mempool->dev);
   
   __atomic_add_fetch(&HeTM_stats_data.sizeCpyDataset, cpySize, __ATOMIC_ACQ_REL);
 }
@@ -419,26 +418,62 @@ cpyBMAPtoGPU(
   int devId
 ) {
   size_t cpyrdsetBMAP = 0;
-  size_t size = HeTM_gshared_data.sizeMemPool / sizeof(PR_GRANULE_T);
+  // size_t size = HeTM_gshared_data.sizeMemPool / sizeof(PR_GRANULE_T);
 
   Config::GetInstance()->SelDev(devId);
   PR_curr_dev = devId;
 
+  MemObj *m_cpu_rset_cache = HeTM_cpu_rset_cache.GetMemObj(devId);
+  MemObj *m_gpu_wset_cache = HeTM_gpu_wset_cache.GetMemObj(devId);
+  MemObj *m_gpu_rset_cache = HeTM_gpu_rset_cache.GetMemObj(devId);
+  MemObj *m_cpu_rset       = HeTM_cpu_rset.GetMemObj(devId);
+  MemObj *m_cpu_wset_cache = HeTM_cpu_wset_cache.GetMemObj(devId);
+  MemObj *m_cpu_wset       = HeTM_cpu_wset.GetMemObj(devId);
+
+  // TODO: these copies are probably duplicated
+  m_gpu_wset_cache->CpyDtH(HeTM_memStream[devId]);
+  m_gpu_rset_cache->CpyDtH(HeTM_memStream2[devId]);
+
   MemObjCpyBuilder b;
-  MemObjCpyHtD m(b
+  MemObjCpyHtD mRSET(b
     .SetGranFilter(8) // TODO
     ->SetGranApply(1)
-    ->SetForceFilter(0)
+    ->SetForceFilter(MEMMAN_ONLY_COLLISION)
     ->SetFilterVal(HeTM_gshared_data.batchCount)
-    ->SetCache(HeTM_cpu_rset_cache.GetMemObj(devId))
-    ->SetFilter(HeTM_cpu_rset.GetMemObj(devId))
-    ->SetDst(HeTM_cpu_rset.GetMemObj(devId))
-    ->SetSrc(HeTM_cpu_rset.GetMemObj(devId))
+    ->SetCache(m_cpu_rset_cache)
+    ->SetCache2(m_gpu_wset_cache)
+    ->SetFilter(m_cpu_rset)
+    ->SetDst(m_cpu_rset)
+    ->SetSrc(m_cpu_rset)
+#ifdef BMAP_ENC_1BIT
+    ->SetSizeChunk((BMAP_GRAN >> LOG2_32BITS)*sizeof(unsigned))
+#else
     ->SetSizeChunk(BMAP_GRAN)
+#endif /* BMAP_ENC_1BIT */
     ->SetStrm1(HeTM_memStream[devId])
+    ->SetStrm2(HeTM_memStream[devId])
+  );
+  cpyrdsetBMAP = mRSET.Cpy();
+
+  // TODO: can we put this copy in background somehow?
+  MemObjCpyHtD mWSET(b
+    .SetGranFilter(8) // TODO
+    ->SetGranApply(1)
+    ->SetForceFilter(MEMMAN_NONE)
+    ->SetFilterVal(HeTM_gshared_data.batchCount)
+    ->SetCache(m_cpu_wset_cache)
+    ->SetFilter(m_cpu_wset)
+    ->SetDst(m_cpu_wset)
+    ->SetSrc(m_cpu_wset)
+#ifdef BMAP_ENC_1BIT
+    ->SetSizeChunk((BMAP_GRAN >> LOG2_32BITS)*sizeof(unsigned))
+#else
+    ->SetSizeChunk(BMAP_GRAN)
+#endif /* BMAP_ENC_1BIT */
+    ->SetStrm1(HeTM_memStream2[devId])
     ->SetStrm2(HeTM_memStream2[devId])
   );
-  cpyrdsetBMAP = m.Cpy();
+  cpyrdsetBMAP += mWSET.Cpy();
 
   __atomic_add_fetch(&HeTM_stats_data.sizeCpyWSetHtD, cpyrdsetBMAP, __ATOMIC_ACQ_REL);
 
@@ -448,7 +483,7 @@ cpyBMAPtoGPU(
   launchCPUGPUConflDetectKernel(devId);
 }
 
-static void
+void
 cpyCPUwrtsetToGPU(
   int nonBlock
 ) {
@@ -477,13 +512,12 @@ cpyCPUwrtsetToGPU(
   for (int j = 0; j < nbGPUs; ++j)
   { 
     Config::GetInstance()->SelDev(j);
-    CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)HeTM_memStream[j]), "");
+    // CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)HeTM_memStream[j]), "");
+    // CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)HeTM_memStream2[j]), "");
 
     if (!nonBlock)
-    {
       HeTM_sync_barrier(j); // unblock GPU for the next round
-    }
-    HETM_DEB_THRD_CPU("thread %i decreases threadsWaitingSync\n", HeTM_thread_data[j]->id);
+    // HETM_DEB_THRD_CPU("thread %i decreases threadsWaitingSync (%i)\n", HeTM_thread_data[j]->id, HeTM_shared_data[j].threadsWaitingSync);
     __sync_add_and_fetch(&HeTM_shared_data[j].threadsWaitingSync, -1);
 
     // if (!nonBlock)
@@ -496,17 +530,18 @@ cpyCPUwrtsetToGPU(
 }
 
 static void
-dealWithDatasetSync()
+dealWithDatasetSync(int isNonBlock)
 {
   int tid = HeTM_thread_data[0]->id;
-  const int CPUid = HETM_NB_DEVICES;
+  const int nbGPUs = Config::GetInstance()->NbGPUs();
+  const int CPUid = nbGPUs;
 
   // TODO: requires GPU side to call HeTM_sync_next_batch
-  HETM_DEB_THRD_CPU("thread %i waits for GPU BB\n", tid);
-  HeTM_sync_BB(); // wait GPU BB
-  HETM_DEB_THRD_CPU("thread %i after wait for GPU BB\n", tid);
+  // HETM_DEB_THRD_CPU("thread %i waits for GPU BB\n", tid);
+  if (!isNonBlock)
+    HeTM_sync_BB(); // wait GPU BB
+  // HETM_DEB_THRD_CPU("thread %i after wait for GPU BB\n", tid);
 
-  NVTX_PUSH_RANGE("rollback CPU", NVTX_PROF_ROLLBACK_CPU);
   int *p, *q;
   // int isCPUabort = 1;
   int someCommittingDevice = -1;
@@ -528,12 +563,6 @@ dealWithDatasetSync()
     p++;
   }
 
-  /* if (isCPUabort && (someCommittingDevice % HeTM_gshared_data.nbCPUThreads == tid))
-  {
-    overrideCPUmodificationsWithGPUdataset(someCommittingDevice);
-  } */
-  NVTX_POP_RANGE(); // NVTX_PROF_ROLLBACK_CPU
-
   // NVTX_PUSH_RANGE("cpy wrts to CPU", NVTX_PROF_CPY_GPUS_TO_CPU);
   p = sol;
   while (*p != -1)
@@ -552,7 +581,7 @@ dealWithDatasetSync()
 #endif /* USE_NVTX */
           NVTX_PUSH_RANGE(prof_msg, NVTX_PROF_CPY_GPUS_TO_CPU);
           // printf("cpy dataset from dev%i to dev%i\n", *q, *p);
-          cpyModifications(*p, *q);
+          cpyModifications(*p, *q, /* not override */0);
           NVTX_POP_RANGE();
         }
         if (*q % HeTM_gshared_data.nbCPUThreads == tid)
@@ -563,7 +592,7 @@ dealWithDatasetSync()
 #endif /* USE_NVTX */
           NVTX_PUSH_RANGE(prof_msg, NVTX_PROF_CPY_GPUS_TO_CPU);
           // printf("cpy dataset from dev%i to dev%i\n", *p, *q);
-          cpyModifications(*q, *p);
+          cpyModifications(*q, *p, /* not override */0);
           NVTX_POP_RANGE();
         }
       }
@@ -576,18 +605,19 @@ dealWithDatasetSync()
     p++;
   }
 
-  // at this point someCommittingDevice has a correct image
   while (*abortingDevs != -1)
   {
     // TODO: need to either augment the write-set of someCommittingDevice or copy all
     if (*abortingDevs % HeTM_gshared_data.nbCPUThreads == tid)
     {
+      // printf("DEV%i ABORTED! handled by tid = %i\n", *abortingDevs, tid);
 #ifdef USE_NVTX
       char prof_msg[128];
-      sprintf(prof_msg, "rollback dataset from dev%i with dev%i\n", *abortingDevs, someCommittingDevice);
+      sprintf(prof_msg, "rollback dev%i with dev%i\n", *abortingDevs, someCommittingDevice);
 #endif /* USE_NVTX */
       NVTX_PUSH_RANGE(prof_msg, NVTX_PROF_CPY_GPUS_TO_CPU);
-      cpyModifications(*abortingDevs, someCommittingDevice);
+      // overrideCPUmodificationsWithGPUdataset(someCommittingDevice);
+      cpyModifications(*abortingDevs, someCommittingDevice, /* override */1);
       NVTX_POP_RANGE();
     }
     abortingDevs++;
@@ -601,12 +631,26 @@ dealWithDatasetSync()
   //     broadcastCPUdataset(i);
   // }
 
-
-  // Reset the conflict matrix
-  for (int k = 0; k < HETM_NB_DEVICES; ++k) {
-    memset((void*)HeTM_shared_data[k].mat_confl_GPU_unif, 0, sizeof(char)*((HETM_NB_DEVICES+1)*(HETM_NB_DEVICES+1)));
+  p = sol;
+  while (*p != -1)
+  {
+    if (*p != CPUid && *p % HeTM_gshared_data.nbCPUThreads == tid)
+    {
+      // HETM_DEB_THRD_CPU("Wait dataset cpy of dev%i", *p);
+      Config::GetInstance()->SelDev(*p);
+      CUDA_CHECK_ERROR(cudaDeviceSynchronize(), "");
+    }
+    p++;
   }
-  memset((void*)HeTM_gshared_data.mat_confl_CPU_unif, 0, sizeof(char)*((HETM_NB_DEVICES+1)*(HETM_NB_DEVICES+1)));
+
+  if (tid == 0)
+  {
+    // Reset the conflict matrix
+    for (int k = 0; k < HETM_NB_DEVICES; ++k) {
+      memset((void*)HeTM_shared_data[k].mat_confl_GPU_unif, 0, sizeof(char)*((HETM_NB_DEVICES+1)*(HETM_NB_DEVICES+1)));
+    }
+    memset((void*)HeTM_gshared_data.mat_confl_CPU_unif, 0, sizeof(char)*((HETM_NB_DEVICES+1)*(HETM_NB_DEVICES+1)));
+  }
 
   // accumulateStatistics();
   // NVTX_POP_RANGE(); // NVTX_PROF_CPY_GPUS_TO_CPU

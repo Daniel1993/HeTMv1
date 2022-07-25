@@ -28,8 +28,7 @@ void GPUbufferReadFromFile_NO_CONFLS() {
   int buffer_last = size_of_GPU_input_buffer/sizeof(int);
   GPU_input_file = fopen(parsedData.GPUInputFile, "r");
 
-  memman_select("GPU_input_buffer_good");
-  int *cpu_ptr = (int*)memman_get_cpu(NULL);
+  int *cpu_ptr = (int*)GPU_input_buffer_good.GetMemObj(j)->host;
 
   // unsigned rnd = 12345723; //RAND_R_FNC(input_seed);
   unsigned rnd; // = (*zipf_dist)(generator);
@@ -42,8 +41,7 @@ void GPUbufferReadFromFile_NO_CONFLS() {
     cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3) //2*i;//
   }
 
-  memman_select("GPU_input_buffer_bad");
-  cpu_ptr = (int*)memman_get_cpu(NULL);
+  cpu_ptr = (int*)GPU_input_buffer_bad.GetMemObj(j)->host;
   for (int i = 0; i < buffer_last; ++i) {
     if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
       printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
@@ -79,7 +77,8 @@ void CPUbufferReadFromFile_NO_CONFLS() {
 	}
 }
 
-void GPUbufferReadFromFile_CONFLS() {
+void GPUbufferReadFromFile_CONFLS()
+{
   int buffer_last = size_of_GPU_input_buffer/sizeof(int);
 	GPU_input_file = fopen(parsedData.GPUInputFile, "r");
 
@@ -88,8 +87,7 @@ void GPUbufferReadFromFile_CONFLS() {
 	// 	zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
 	// }
 
-	memman_select("GPU_input_buffer_good");
-	int *cpu_ptr = (int*)memman_get_cpu(NULL);
+	int *cpu_ptr = (int*)GPU_input_buffer_good.GetMemObj(j)->host;
   unsigned rnd; // = (*zipf_dist)(generator);
   for (int i = 0; i < buffer_last; ++i) {
     if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
@@ -99,8 +97,7 @@ void GPUbufferReadFromFile_CONFLS() {
     cpu_ptr[i] = (rnd - mod);//2*i;//
   }
 
-  memman_select("GPU_input_buffer_bad");
-  cpu_ptr = (int*)memman_get_cpu(NULL);
+  cpu_ptr = (int*)GPU_input_buffer_bad.GetMemObj(j)->host;
 
   for (int i = 0; i < buffer_last; ++i) {
     if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
@@ -111,7 +108,8 @@ void GPUbufferReadFromFile_CONFLS() {
   }
 }
 
-void GPUbufferReadFromFile_UNIF_RAND() {
+void GPUbufferReadFromFile_UNIF_RAND()
+{
   int buffer_last = size_of_GPU_input_buffer/sizeof(int);
 	GPU_input_file = fopen(parsedData.GPUInputFile, "r");
 
@@ -120,8 +118,7 @@ void GPUbufferReadFromFile_UNIF_RAND() {
 	// 	zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
 	// }
 
-	memman_select("GPU_input_buffer_good");
-	int *cpu_ptr = (int*)memman_get_cpu(NULL);
+	int *cpu_ptr = (int*)GPU_input_buffer_good.GetMemObj(j)->host;
   unsigned rnd; // = (*zipf_dist)(generator);
 	for (int i = 0; i < buffer_last; ++i) {
 		rnd = rand();
@@ -129,8 +126,7 @@ void GPUbufferReadFromFile_UNIF_RAND() {
 		cpu_ptr[i] = (rnd - mod);//2*i;//
 	}
 
-	memman_select("GPU_input_buffer_bad");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
+	cpu_ptr = (int*)GPU_input_buffer_bad.GetMemObj(j)->host;
 
 	for (int i = 0; i < buffer_last; ++i) {
 		rnd = rand();
@@ -139,7 +135,8 @@ void GPUbufferReadFromFile_UNIF_RAND() {
 	}
 }
 
-void CPUbufferReadFromFile_CONFLS() {
+void CPUbufferReadFromFile_CONFLS()
+{
   int good_buffers_last = size_of_CPU_input_buffer/sizeof(int);
 	int bad_buffers_last = 2*size_of_CPU_input_buffer/sizeof(int);
 	CPU_input_file = fopen(parsedData.CPUInputFile, "r");
@@ -188,8 +185,7 @@ void GPUbuffer_NO_CONFLS() {
 	// 	zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
 	// }
 
-	memman_select("GPU_input_buffer_good");
-	int *cpu_ptr = (int*)memman_get_cpu(NULL);
+	int *cpu_ptr = (int*)GPU_input_buffer_good.GetMemObj(j)->host;
   unsigned rnd; // = (*zipf_dist)(generator);
 	for (int i = 0; i < buffer_last; ++i) {
 		rnd = (rand() % parsedData.CONFL_SPACE) + parsedData.CONFL_SPACE;
@@ -197,8 +193,7 @@ void GPUbuffer_NO_CONFLS() {
 		cpu_ptr[i] = (rnd - mod);//2*i;//
 	}
 
-	memman_select("GPU_input_buffer_bad");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
+	cpu_ptr = (int*)GPU_input_buffer_bad.GetMemObj(j)->host;
 
 	for (int i = 0; i < buffer_last; ++i) {
     if (i < parsedData.NB_CONFL_GPU_BUFFER) {
@@ -247,16 +242,14 @@ void GPUbuffer_UNIF_2()
 	// 	zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
 	// }
 
-	memman_select("GPU_input_buffer_good");
-	int *cpu_ptr = (int*)memman_get_cpu(NULL);
+	int *cpu_ptr = (int*)GPU_input_buffer_good.GetMemObj(j)->host;
   unsigned rnd; // = (*zipf_dist)(generator);
 	for (int i = 0; i < buffer_last; ++i) {
 		rnd = (rand() % parsedData.CONFL_SPACE) + parsedData.CONFL_SPACE;
 		cpu_ptr[i] = rnd;
 	}
 
-	memman_select("GPU_input_buffer_bad");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
+	cpu_ptr = (int*)GPU_input_buffer_bad.GetMemObj(j)->host;
 
 	for (int i = 0; i < buffer_last; ++i) {
     rnd = rand() % parsedData.CONFL_SPACE; // different from NO_CONFL --> fills the buffer
@@ -288,8 +281,7 @@ void GPUbuffer_ZIPF_2()
   unsigned maxGen = parsedData.CONFL_SPACE * parsedData.num_ways;
   zipf_setup(maxGen, 0.5);
 
-	memman_select("GPU_input_buffer_good");
-	int *cpu_ptr = (int*)memman_get_cpu(NULL);
+	int *cpu_ptr = cpu_ptr = (int*)GPU_input_buffer_good.GetMemObj(j)->host;
   unsigned rnd, zipfRnd; // = (*zipf_dist)(generator);
 
   // int done = 0;
@@ -301,8 +293,7 @@ void GPUbuffer_ZIPF_2()
 		cpu_ptr[i] = rnd;
 	}
 
-	memman_select("GPU_input_buffer_bad");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
+	cpu_ptr = (int*)GPU_input_buffer_bad.GetMemObj(j)->host;
   // done = 0;
 	for (int i = 0; i < buffer_last; ++i) {
     zipfRnd = zipf_gen();

@@ -16,6 +16,7 @@
 #define NVTX_PROF_CPU_WAITS_NEXT_BATCH 8
 #define NVTX_PROF_GPU_WAITS_NEXT_BATCH 9
 #define NVTX_PROF_ROLLBACK_CPU    10
+#define NVTX_RUN_TX_BATCH         11
 
 
 
@@ -76,7 +77,7 @@ extern "C" {
 #endif
 
 // TODO: better naming do not call it outside hetm code
-#define WAIT_ON_FLAG(flag) while(!(flag) && !HeTM_is_stop(0)) PAUSE(); __atomic_store_n(&flag, 0, __ATOMIC_RELAXED);
+#define WAIT_ON_FLAG(flag) while(!(__atomic_load_n(&flag, __ATOMIC_ACQUIRE)) && !HeTM_is_stop()) PAUSE(); __atomic_store_n(&flag, 0, __ATOMIC_RELAXED);
 
 typedef void*(*HeTM_gpu_work_fn)(void*);
 typedef struct offload_gpu_
@@ -89,7 +90,8 @@ typedef struct offload_gpu_
 offload_gpu_s;
 
 // ----------------------- HeTM CPU
-void checkCPUCmpDone(int devId);
+void cpyCPUwrtsetToGPU(int nonBlock);
+void waitNextBatch(int nonBlock);
 void pollIsRoundComplete(int nonBlock);
 void resetInterGPUConflFlag();
 void runBeforeCPU(int id, void *data);

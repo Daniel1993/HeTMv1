@@ -16,10 +16,13 @@ class TestBMAP : public CPPUNIT_NS::TestFixture
 {
 	CPPUNIT_TEST_SUITE(TestBMAP);
 	CPPUNIT_TEST(TestAllConflict);
-	CPPUNIT_TEST(TestGPUsConflict);
-	CPPUNIT_TEST(TestRWDifferentPositions);
 	CPPUNIT_TEST(TestWrtDifferentReadSamePositions);
+	CPPUNIT_TEST(TestRWDifferentPositions2);
+	CPPUNIT_TEST(TestRWDifferentPositions);
+	CPPUNIT_TEST(TestGPUsConflict);
+	CPPUNIT_TEST(TestGPUsConflictNotFirstChunk);
 	CPPUNIT_TEST(TestCache);
+	CPPUNIT_TEST(TestDisjointChunkWrites);
 	CPPUNIT_TEST_SUITE_END();
 
 public:
@@ -31,8 +34,11 @@ public:
 private:
 	void TestAllConflict();
 	void TestGPUsConflict();
+	void TestGPUsConflictNotFirstChunk();
+	void TestDisjointChunkWrites();
 	
 	void TestRWDifferentPositions();
+	void TestRWDifferentPositions2();
 	void TestWrtDifferentReadSamePositions();
 	void TestCache();
 } ;

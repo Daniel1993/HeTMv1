@@ -14,6 +14,7 @@ DISABLE_WS       ?= 0
 DISABLE_EARLY_VALIDATION ?= 0
 REDUCED_RS       ?= 0
 HETM_NB_DEVICES  ?= 2
+BMAP_ENC_1BIT    ?= 0
 USE_TSX_IMPL     ?= 0
 
 SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
@@ -28,6 +29,10 @@ DEFINES += \
   -DSTM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE) \
   -DHETM_NB_DEVICES=$(HETM_NB_DEVICES) \
   -DBMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
+
+ifeq ($(BMAP_ENC_1BIT),1)
+DEFINES += -DBMAP_ENC_1BIT
+endif
 
 ifeq ($(DISABLE_RS),1)
 DEFINES += -DHETM_DISABLE_RS=1

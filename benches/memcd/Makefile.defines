@@ -20,6 +20,7 @@ LOG_SIZE            ?= 32768
 STM_LOG_BUFFER_SIZE ?= 4
 DISABLE_RS      ?= 0
 DISABLE_WS      ?= 0
+REDUCED_RS ?= 0
 DISABLE_EARLY_VALIDATION ?= 0
 
 REQUEST_LATENCY ?= 10.0
@@ -36,8 +37,8 @@ INST_CPU        ?= 1
 
 ### IMPORTANT: for MEMCD this must be configured (e.g., PR_MAX_RWSET_SIZE=16)!!!
 PR_MAX_RWSET_SIZE ?= 2
-DEFAULT_blockNum  ?=
-DEFAULT_threadNum ?=
+DEFAULT_blockNum  ?= 10
+DEFAULT_threadNum ?= 256
 
 SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
 SYS_CPU_NB_CORES=$(shell cat /proc/cpuinfo | grep processor | wc -l)
@@ -55,6 +56,7 @@ DEFINES += -DLOG_TYPE=$(LOG_TYPE) \
 	-DSYS_CPU_NB_CORES=$(SYS_CPU_NB_CORES) \
 	-DREQUEST_LATENCY=$(REQUEST_LATENCY) \
 	-DREQUEST_GRANULARITY=$(REQUEST_GRANULARITY) \
+	-DHETM_REDUCED_RS=$(REDUCED_RS) \
 	-DREQUEST_CPU=$(REQUEST_CPU) \
 	-DREQUEST_GPU=$(REQUEST_GPU) \
 	-DBMAP_GRAN_BITS=$(BMAP_GRAN_BITS)

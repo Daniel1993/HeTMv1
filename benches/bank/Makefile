@@ -70,9 +70,7 @@ endif
 
 CFLAGS     := -c $(DEFINES) $(INCLUDES) -std=c11
 CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -std=c++11 -Wall
-NVFLAGS    := -dc $(DEFINES) $(INCLUDES) -std=c++11 \
-	--default-stream per-thread \
-	-arch sm_60
+NVFLAGS    := -dc $(DEFINES) $(INCLUDES) -std=c++11
 LDFLAGS    := $(LIBS) -l tbb -l tbbmalloc
 
 ifeq ($(USE_TSX_IMPL),1)
@@ -122,10 +120,10 @@ BANK_OBJS  := \
 	$(BENCH_BANK_OBJS) \
 	$(SHARED)/src/shared.o
 
+# $(SRC)/cmp_kernels.o 
 MEMCD_OBJS  := \
 	$(SRC)/memcd2.o \
 	$(SRC)/bankKernel.o \
-	$(SRC)/cmp_kernels.o \
 	$(SHARED)/src/shared.o \
 	$(SRC)/setupKernels.o \
 	$(SRC)/memcdKernel.o \
@@ -216,6 +214,7 @@ $(HETM_ROOT)/hetm-inst-gpu.o: $(DEPS_PR_STM_OBJS) $(CODE_HTM_SRCS)
 		CFG=$(CFG) \
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		PRINT_DEB=$(PRINT_DEB) \
 		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
@@ -230,6 +229,7 @@ $(DEPS_CUDA_UTIL_OBJS) $(CUDA_UTIL_DIR)/libcuda-util.a: $(DEPS_CUDA_UTIL_SRCS)
 	@echo " ============================================ "
 	$(MAKE) --directory $(CUDA_UTIL_DIR) clean
 	$(MAKE) -j14 --directory $(CUDA_UTIL_DIR) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		CFG=$(CFG) 
 
 $(DEPS_PR_STM_OBJS): $(DEPS_PR_STM_SRCS)
@@ -255,6 +255,8 @@ alldeps:
 	@echo " ============================================ "
 	$(MAKE) --directory $(CUDA_UTIL_DIR) clean
 	$(MAKE) -j14 --directory $(CUDA_UTIL_DIR) \
+		BMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		CFG=$(CFG) 
 	@echo " ============================================ "
 	@echo " === Building PR-STM lib "
@@ -274,9 +276,11 @@ alldeps:
 		CFG=$(CFG) \
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
+		BMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		PRINT_DEB=$(PRINT_DEB) \
 		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		HETM_NB_DEVICES=$(HETM_NB_DEVICES) \
 		REDUCED_RS=$(REDUCED_RS) \
 		DISABLE_RS=$(DISABLE_RS) \
@@ -318,8 +322,10 @@ alldeps:
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
+		BMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
 		PRINT_DEB=$(PRINT_DEB) \
 		LOG_SIZE=$(LOG_SIZE) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
 		STM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE) \
 		HETM_NB_DEVICES=$(HETM_NB_DEVICES) \

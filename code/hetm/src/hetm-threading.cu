@@ -45,9 +45,7 @@ int HeTM_set_thread_mapping_fn(HeTM_map_tid_to_core fn)
 
 int HeTM_start(HeTM_callback CPUclbk, HeTM_callback GPUclbk, void *args)
 {
-  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
-    HeTM_set_is_stop(j, 0);
-  }
+  HeTM_set_is_stop(0);
   // Inits threading sync barrier
   if (!HeTM_gshared_data.isCPUEnabled) {
     barrier_init(wait_callback, 2); // GPU on
@@ -92,11 +90,13 @@ int HeTM_start(HeTM_callback CPUclbk, HeTM_callback GPUclbk, void *args)
 
 int HeTM_join_CPU_threads()
 {
-  HeTM_async_set_is_stop(0, 1);
+  HeTM_set_is_stop(1);
+  HeTM_async_set_is_stop(1);
   // WARNING: HeTM_set_is_stop(1) must be called before this point
   for (int j = 0; j < HETM_NB_DEVICES; ++j) HeTM_flush_barrier(j);
   PR_SET_IS_DONE(1); // unblocks who is wanting for PR-STM
   barrier_cross(wait_callback);
+
   int i;
   // int tmp = HeTM_async_is_stop(0);
   for (i = 0; i < HeTM_gshared_data.nbThreads; i++) {
@@ -105,14 +105,11 @@ int HeTM_join_CPU_threads()
     thread_join_or_die(HeTM_shared_data[0].threadsInfo[i].thread, NULL);
   }
   barrier_destroy(wait_callback);
-  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
-    // thread_join_or_die(gpuThreads[j], NULL);
-    HeTM_async_set_is_stop(j, 1); // TODO: do we want to stop the thread here?
-  }
   HETM_DEB_THREADING("Joining with offload thread ...");
   RUN_ASYNC(emptyRequest, NULL);
+  for (int j = 0; j < HETM_NB_DEVICES; ++j) HeTM_flush_barrier(j);
   thread_join_or_die(HeTM_shared_data[0].asyncThread, NULL);
-  // HeTM_async_set_is_stop(0, tmp);
+  // HeTM_async_set_is_stop(tmp);
   isCreated = 0;
   return 0;
 }
@@ -146,7 +143,7 @@ static void* offloadThread(void*)
   sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
 
   // TODO: only waiting GPU 0 to stop
-  while (!HeTM_async_is_stop(0) || !hetm_pc_is_empty(HeTM_offload_pc)) {
+  while (!HeTM_async_is_stop() || !hetm_pc_is_empty(HeTM_offload_pc)) {
     hetm_pc_consume(HeTM_offload_pc, (void**)&req);
     req->fn(req->args);
     HeTM_free_async_request(req);
@@ -221,10 +218,10 @@ static void* threadWait(void *argPtr)
       // COMPILER_FENCE();
       __sync_synchronize();
       callback = args->callback;
-      if (HeTM_is_stop(0)) break;
+      if (HeTM_is_stop()) break;
       // pthread_yield();
     }
-    if (HeTM_is_stop(0)) break;
+    if (HeTM_is_stop()) break;
 
     // Runs the corresponding thread type (worker or controller)
     if (threadId == idGPU) {

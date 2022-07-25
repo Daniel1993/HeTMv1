@@ -1,7 +1,7 @@
 #ifndef BANK_AUX_H_
 #define BANK_AUX_H_
 
-#include "bitmap.h"
+#include "bitmap.hpp"
 
 // TODO: refactor this code else where
 /* ################################################################### *

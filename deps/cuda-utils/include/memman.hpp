@@ -19,14 +19,12 @@
 #endif
 
 enum {
-  MEMMAN_NONE  = 0b00000,
-  MEMMAN_ASYNC = 0b00001,
-  MEMMAN_THRLC = 0b00010, // thread local memory
-  MEMMAN_COPY  = 0b00100,
-  MEMMAN_UNIF  = 0b01000, // unified memory
-  MEMMAN_BMAP  = 0b10000, // only copy some blocks (HtD)
-  MEMMAN_BMAP_DtH = 0b100000, // same as MEMMAN_BMAP but DtH
-  MEMMAN_FAKE = 0b100000 // same as MEMMAN_BMAP but DtH
+  MEMMAN_NONE           = 0b00000,
+  MEMMAN_FILTER         = 0b00001,
+  MEMMAN_ONLY_COLLISION = 0b00010,
+  MEMMAN_ON_COLLISION   = 0b00100,
+  MEMMAN_OVERRIDE       = 0b10000,
+  MEMMAN_UNIF           = 0b01000 // unified memory
 };
 
 namespace memman
@@ -131,9 +129,10 @@ class MemObjCpyBuilder
     MemObjCpyBuilder()
       : m_gran_filter(8),
         m_gran_apply(4),
-        m_force_filter(1),
+        m_force_filter(MEMMAN_FILTER),
         m_filter_val(1),
         m_cache(nullptr),
+        m_cache2(nullptr),
         m_filter(nullptr),
         m_dst(nullptr),
         m_src(nullptr),
@@ -147,6 +146,7 @@ class MemObjCpyBuilder
     MemObjCpyBuilder *SetForceFilter(int fltr) { m_force_filter= fltr; return this; }
     MemObjCpyBuilder *SetFilterVal  (int val)  { m_filter_val  = val;  return this; }
     MemObjCpyBuilder *SetCache      (MemObj*c) { m_cache       = c;    return this; }
+    MemObjCpyBuilder *SetCache2     (MemObj*c) { m_cache2      = c;    return this; }
     MemObjCpyBuilder *SetFilter     (MemObj*f) { m_filter      = f;    return this; }
     MemObjCpyBuilder *SetDst        (MemObj*d) { m_dst         = d;    return this; }
     MemObjCpyBuilder *SetSrc        (MemObj*s) { m_src         = s;    return this; }
@@ -157,9 +157,10 @@ class MemObjCpyBuilder
   private:
     int m_gran_filter; // BMAP uses 8 bits, set to 1 to use single bit
     int m_gran_apply;  // Number of bytes to apply (default 4)
-    int m_force_filter;// force apply ONLY changed regions
+    int m_force_filter;// force apply ONLY changed regions (MEMMAN_FILTER) or in collision of bmap caches (MEMMAN_ONLY_COLLISION)
     int m_filter_val;  // value to find in the filter in order to apply
     MemObj *m_cache;   // cache of the filter in host memory
+    MemObj *m_cache2;  // cache of the second filter in host memory (MEMMAN_ONLY_COLLISION)
     MemObj *m_filter;  // location of the filter 
     MemObj *m_dst;     // destiny buffer
     MemObj *m_src;     // source buffer
@@ -179,6 +180,7 @@ class MemObjCpy
       force_filter(b->m_force_filter),
       filter_val(b->m_filter_val),
       cache(b->m_cache),
+      cache2(b->m_cache2),
       filter(b->m_filter),
       dst(b->m_dst),
       src(b->m_src),
@@ -200,6 +202,7 @@ class MemObjCpy
     int force_filter;
     int filter_val;
     MemObj *cache;
+    MemObj *cache2;
     MemObj *filter;
     MemObj *dst;
     MemObj *src;

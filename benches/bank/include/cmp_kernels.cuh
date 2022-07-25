@@ -18,7 +18,7 @@
 #include "cuda_wrapper.h"
 #include "helper_timer.h"
 #include <time.h>
-#include "bitmap.h"
+#include "bitmap.hpp"
 
 #include "hetm-cmp-kernels.cuh"
 

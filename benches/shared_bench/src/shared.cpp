@@ -363,11 +363,10 @@ void bank_printStats(thread_data_t *data)
   printf("   >>> TXs NON_BLOCK  = %li\n", HeTM_stats_data.txsNonBlocking);
   printf("   >>> TXs            = %li\n", HeTM_stats_data.nbTxsCPU);
   printf(" TOTAL TIME IN BENCHMARK = %14.5fms\n", data->duration2);
-  printf("   > ON BATCH            = %14.5f  \n", HeTM_stats_data.timePRSTM*1000);
+  printf("   > ON BATCH            = %14.5f  \n", HeTM_stats_data.timePRSTM*1000.0);
   printf("      >> kernel          = %14.5f\n", HeTM_stats_data.timeGPU);
-  printf("   > ON COMPARING        = %14.5f\n", HeTM_stats_data.timeCMP*1000);
-  printf("   > AFTER CMP           = %14.5f\n", HeTM_stats_data.timeAfterCMP*1000);
-  printf("   > CPU inter-dev val   = %14.5f\n", (double)HeTM_stats_data.timeCPUcmp/1000000.0/data->nb_threadsCPU);
+  printf("   > ON COMPARING        = %14.5f\n", HeTM_stats_data.timeCMP*1000.0);
+  printf("   > AFTER CMP           = %14.5f\n", HeTM_stats_data.timeAfterCMP*1000.0);
   
   printf(" DATA TRANSFERED (B)\n");
   printf("   > wset HtD all GPUs = %zuB\n", HeTM_stats_data.sizeCpyWSetHtD);

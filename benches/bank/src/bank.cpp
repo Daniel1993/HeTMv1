@@ -310,8 +310,6 @@ int main(int argc, char **argv)
 	// ### Input management
 	bank_parseArgs(argc, argv, &parsedData);
 
-	// ---------------------------------------------------------------------------
-	// --- prototype (meaning shitty code)
 	maxGPUoutputBufferSize = parsedData.GPUthreadNum*parsedData.GPUblockNum*sizeof(int);
 	currMaxCPUoutputBufferSize = maxGPUoutputBufferSize; // realloc on full
 
@@ -378,9 +376,6 @@ int main(int argc, char **argv)
 	// fill_GPU_input_buffers();
 	// fill_CPU_input_buffers();
 	// ---------------------------------------------------------------------------
-
-  	// #define EXPLICIT_LOG_BLOCK (parsedData.trans * BANK_NB_TRANSFERS)
-  	HeTM_set_explicit_log_block_size(parsedData.trans * BANK_NB_TRANSFERS); // TODO:
 
 	// TODO: needs to pass here the number of GPUs (or get from memman)
   	HeTM_init((HeTM_init_s) {
@@ -456,10 +451,7 @@ int main(int argc, char **argv)
 	for (j = 0; j < parsedData.iter; j++)
 	{ // Loop for testing purposes
 		//Clear flags
-		for (int d = 0; d < nbGPUs; d++)
-		{
-			HeTM_set_is_stop(d, 0);
-		}
+		HeTM_set_is_stop(0);
 		global_fix = 0;
 
 		// ##############################################
@@ -506,12 +498,6 @@ int main(int argc, char **argv)
 			sigsuspend(&block_set);
 		}
 
-		for (int d = 0; d < nbGPUs; d++)
-		{
-			HeTM_set_is_stop(d, 1);
-			HeTM_async_set_is_stop(d, 1);
-		}
-
 		TIMER_READ(parsedData.end);
 		printf("STOPPING...\n");
 
@@ -541,9 +527,7 @@ int main(int argc, char **argv)
 	bank_statsFile(&parsedData);
 
 	/* Delete bank and accounts */
-	HeTM_mempool_destroy(0);
 	free(bank);
-
 	free(threads);
 	free(data);
 

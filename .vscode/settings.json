@@ -22,5 +22,6 @@
     "wrappers.h": "c",
     "stm_internal.h": "c",
     "hetm-log.h": "c"
-  }
+  },
+  "cmake.configureOnOpen": false
 }

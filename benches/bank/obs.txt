@@ -47,3 +47,10 @@ cuda-gdb --args ./bank -n 1 -b 1 -x 1 -T 4 -a 100000 -d 15000 -R 20 -S 1 -l 1 -N
 
 breaks
 
+2020-06-01
+
+New task: collect the copies and then come up with some strategy to make them faster 
+
+compiling with:
+./compile.sh opt CMP_TYPE=COMPRESSED HETM_CPU_EN=1 HETM_GPU_EN=1 LOG_TYPE=BMAP USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 BANK_PART=9 GPU_PART=0.5 CPU_PART=0.5 P_INTERSECT=0.0 PROFILE=1 BMAP_GRAN_BITS=15 HETM_NB_DEVICES=2 CFG=debug DEBUG=1  >/dev/null
+

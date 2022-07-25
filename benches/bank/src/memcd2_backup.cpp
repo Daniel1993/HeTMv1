@@ -515,9 +515,6 @@ int main(int argc, char **argv)
 	fill_CPU_input_buffers();
 	// ---------------------------------------------------------------------------
 
-  // #define EXPLICIT_LOG_BLOCK (parsedData.trans * BANK_NB_TRANSFERS)
-  HeTM_set_explicit_log_block_size(parsedData.trans * BANK_NB_TRANSFERS); // TODO:
-
   HeTM_init((HeTM_init_s){
 #if CPU_INV == 1
     .policy       = HETM_CPU_INV,

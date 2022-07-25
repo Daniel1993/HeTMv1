@@ -91,7 +91,7 @@ void TestCP::TestMultipleRuns()
   });
 
 	HeTM_start(empty, NULL, NULL);
-	HeTM_set_is_stop(0, 1); // only one exit is allowed
+	HeTM_set_is_stop(1); // only one exit is allowed
 	HeTM_join_CPU_threads();
 	HeTM_destroy();
 
@@ -168,9 +168,9 @@ static void spamPC(int id, void *argsPtr)
 		args->matrix[res->from*args->nbSpamObjs + res->counter] = res->counter;
 	}
 	HeTM_sync_barrier(0);
-	HeTM_set_is_stop(0, 1);
+	HeTM_set_is_stop(1);
 	free(array);
 }
 
 static void empty(int id, void *argsPtr) { }
-static void emptyExit(int id, void *argsPtr) { HeTM_set_is_stop(0, 1); }
+static void emptyExit(int id, void *argsPtr) { HeTM_set_is_stop(1); }

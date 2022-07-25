@@ -3,13 +3,13 @@
 
 #include <sys/time.h>
 
-#define TIMER_T                         struct timeval
+#define TIMER_T                         struct timeval/*  timespec */
 
-#define TIMER_READ(time)                gettimeofday(&(time), NULL)
+#define TIMER_READ(time)                gettimeofday(&(time), NULL)/* clock_gettime(CLOCK_MONOTONIC_RAW, &(time)) */
 
 #define TIMER_DIFF_SECONDS(start, stop) \
-    (((double)(stop.tv_sec)  + (double)(stop.tv_usec / 1000000.0)) - \
-     ((double)(start.tv_sec) + (double)(start.tv_usec / 1000000.0)))
+    (((double)(stop.tv_sec)  + ((double)stop.tv_usec / 1.0e6)) - \
+     ((double)(start.tv_sec) + ((double)start.tv_usec / 1.0e6)))
 
 #define HETM_TIMER_KEY_SIZE  128
 

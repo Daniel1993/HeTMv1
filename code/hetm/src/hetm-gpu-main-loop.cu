@@ -49,9 +49,7 @@ void HeTM_gpu_thread()
     runGPUBeforeBatch(threadId, (void*)HeTM_thread_data[0]);
     TIMER_READ(t1);
 
-    doGPUStateReset();
-    WAIT_ON_FLAG(isGPUResetDone); // forces GPU reset before start
-
+    NVTX_PUSH_RANGE("Run TX Batch", NVTX_RUN_TX_BATCH);
     roundCountAfterBatch = *hetm_batchCount;
     do {
       runGPUBeforeKernel(threadId, (void*)HeTM_thread_data[0]);
@@ -60,6 +58,20 @@ void HeTM_gpu_thread()
       runGPUAfterKernel(threadId, (void*)HeTM_thread_data[0]);
     } 
     while(!timeIsOver());
+
+    // ------------- takes statistics
+    extern int PR_enable_auto_stats;
+    extern pr_tx_args_s HeTM_pr_args[HETM_NB_DEVICES];
+    PR_enable_auto_stats = 1;
+    runGPUBeforeKernel(threadId, (void*)HeTM_thread_data[0]);
+    runGPUBatch();
+    waitGPUBatchEnd();
+    runGPUAfterKernel(threadId, (void*)HeTM_thread_data[0]);
+    PR_enable_auto_stats = 0;
+    // -------------
+
+    NVTX_POP_RANGE(); // NVTX_RUN_TX_BATCH
+    NVTX_PUSH_RANGE("Run Sync Phase", NVTX_PROF_SYNC_PHASE);
 
     TIMER_READ(t2);
     // TODO: I'm taking GPU time in PR-STM
@@ -85,7 +97,8 @@ void HeTM_gpu_thread()
 // ---------------------
     HETM_DEB_THRD_GPU("\n-----------------------\n --- Batch mergeDataset (%li sucs, %li fail) \n-----------------------\n",
       HeTM_stats_data.nbBatchesSuccess, HeTM_stats_data.nbBatchesFail);
-    if (HeTM_gshared_data.isCPUEnabled) {
+    if (HeTM_gshared_data.isCPUEnabled)
+    { // TODO: what if there is 2 GPUs?
       mergeGPUDataset();
       // ---------------------
       WAIT_ON_FLAG(isDatasetSyncDone);
@@ -101,12 +114,17 @@ void HeTM_gpu_thread()
 
     accumulateStatistics();
 
-    if (CONTINUE_COND) {
-      runGPUAfterBatch(threadId, (void*)HeTM_thread_data[0]);
-      notifyCPUNextBatch();
-    } else {
+    runGPUAfterBatch(threadId, (void*)HeTM_thread_data[0]);
+    
+    notifyCPUNextBatch();
+    
+    doGPUStateReset();
+    WAIT_ON_FLAG(isGPUResetDone); // forces GPU reset before start
+
+    notifyCPUNextBatch();
+    NVTX_POP_RANGE(); // NVTX_PROF_SYNC_PHASE
+    if (!CONTINUE_COND)
       break;
-    }
   } while (1);
 
   exitGPU();
@@ -170,7 +188,7 @@ int timeIsOver()
 
 void checkIsExit()
 {
-  if (!HeTM_is_stop(0)) {
+  if (!HeTM_is_stop()) {
     for (int j = 0; j < HETM_NB_DEVICES; j++) {
       HeTM_set_GPU_status(j, HETM_BATCH_RUN);
     }

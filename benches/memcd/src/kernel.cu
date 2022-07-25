@@ -12,16 +12,14 @@
 #include "helper_timer.h"
 #include <time.h>
 
-#include "memman.hpp"
-#include "knlman.hpp"
 #include "hetm.cuh"
 
 #include "setupKernels.cuh"
 #include "pr-stm-wrapper.cuh"
+#include "memman.hpp"
+#include "knlman.hpp"
 
-extern "C" {
 #include "cuda_wrapper.h"
-}
 
 #include "bankKernel.cuh"
 
@@ -30,6 +28,9 @@ extern "C" {
 
 #define ARCH             FERMI
 #define DEVICE_ID        0
+
+using namespace memman;
+using namespace knlman;
 
 //Support for the lazylog implementation
 // moved to cmp_kernels.cuh
@@ -48,7 +49,7 @@ extern "C" {
 #define finalIdx          (threadIdx.x+blockIdx.x*blockDim.x)
 #define newLock(x,y,z)    ( ((x) << offVers) | ((y) << offOwn) | (z))
 
-#define uint_64				int
+extern KnlObj *HeTM_bankTx;
 
 typedef struct offload_bank_tx_thread_ {
   cuda_t *d;
@@ -82,7 +83,7 @@ static void offloadBankTxThread(void *argsPtr); // bank_tx
  *
  ****************************************/
  // TODO: put GRANULE_T or account_t
-extern "C"
+
 cuda_t *jobWithCuda_init(account_t *accounts, int nbCPUThreads, int size, int trans, int hash, int tx, int bl, int hprob, float hmult)
 {
   //int *a = (int *)malloc(size * sizeof(int));
@@ -94,17 +95,10 @@ cuda_t *jobWithCuda_init(account_t *accounts, int nbCPUThreads, int size, int tr
 
   TIMER_READ(beginTimer);
 
-  // Choose which GPU to run on, change this on a multi-GPU system.
-  CUDA_CHECK_ERROR(cudaSetDevice(DEVICE_ID), "Device failed");
-
   // Init check Tx kernel
   // TODO: init EXPLICIT
   HeTM_setup_finalTxLog2();
   // HeTM_setup_bankTx(cuda_info.blockNum, cuda_info.threadNum);
-
-  HeTM_initCurandState();
-
-  cuda_configCpy(cuda_info);
 
   time_t t;
   time(&t);
@@ -114,11 +108,15 @@ cuda_t *jobWithCuda_init(account_t *accounts, int nbCPUThreads, int size, int tr
   //Save cuda pointers
   c_data = (cuda_t *)malloc( sizeof(cuda_t) * HETM_NB_DEVICES );
 
-  for (int j = 0; j < HETM_NB_DEVICES; ++j) {
+  for (int j = 0; j < HETM_NB_DEVICES; ++j)
+  {
+    Config::GetInstance()->SelDev(j);
+    cuda_configCpy(cuda_info);
+    HeTM_initCurandState(j);
     c_data[j].host_a = accounts;
-    c_data[j].dev_a = (account_t*)HeTM_map_addr_to_gpu(accounts);
+    c_data[j].dev_a = (account_t*)HeTM_map_addr_to_gpu(j, accounts);
 
-    c_data[j].devStates = HeTM_shared_data.devCurandState;
+    c_data[j].devStates = HeTM_gshared_data.devCurandState;
     c_data[j].size      = cuda_info.size;
     c_data[j].dev_zc    = NULL;
     c_data[j].threadNum = cuda_info.threadNum;
@@ -144,7 +142,7 @@ cuda_t *jobWithCuda_init(account_t *accounts, int nbCPUThreads, int size, int tr
  *		int:		1 in case of success, 0 otherwise
  *
  ****************************************/
-extern "C"
+
 int jobWithCuda_run(cuda_t *d, account_t *a) // TODO: memcd
 {
   static offload_bank_tx_thread_s offload_thread_args;
@@ -171,7 +169,7 @@ int jobWithCuda_run(cuda_t *d, account_t *a) // TODO: memcd
  *		long *:			0 in case of failure, a pointer otherwise
  *
  ****************************************/
-extern "C"
+
 account_t* jobWithCuda_swap(cuda_t *d){
   return d->host_a;
 }
@@ -190,25 +188,37 @@ account_t* jobWithCuda_swap(cuda_t *d){
  *		(None)
  *
  ****************************************/
-extern "C"
-void jobWithCuda_getStats(cuda_t *d, long *ab, long *com) {
+void
+jobWithCuda_getStats(
+  cuda_t *d,
+  long *ab,
+  long *com
+) {
   cudaError_t cudaStatus;
   int err = 1;
 
-  while(err) {
+  while(err)
+  {
     err = 0;
 
-    CHECK_ERROR_CONTINUE(cudaDeviceSynchronize());
-    HeTM_bankTx_cpy_IO();
+    PR_global_data_s *d;
+    *ab  = 0;
+    *com = 0;
+    for (int j = 0; j < Config::GetInstance()->NbGPUs(); j++)
+    {
+      CHECK_ERROR_CONTINUE(cudaDeviceSynchronize());
+      HeTM_bankTx_cpy_IO();
+      PR_curr_dev = j;
+      d = &(PR_global[PR_curr_dev]);
+      //Transfer aborts
+      if (ab != NULL) {
+        *ab += d->PR_nbAborts;
+      }
 
-    //Transfer aborts
-    if (ab != NULL) {
-      *ab = PR_nbAborts;
-    }
-
-    //Transfer commits
-    if (com != NULL) {
-      *com = PR_nbCommits;
+      //Transfer commits
+      if (com != NULL) {
+        *com += d->PR_nbCommits;
+      }
     }
   }
 
@@ -229,7 +239,7 @@ void jobWithCuda_getStats(cuda_t *d, long *ab, long *com) {
  *	Returns:		(none)
  *
  ****************************************/
-extern "C"
+
 void jobWithCuda_exit(cuda_t * d)
 {
   cudaError_t cudaStatus;
@@ -247,8 +257,9 @@ void jobWithCuda_exit(cuda_t * d)
   }
 
   if (d != NULL) {
+    for (int j = 0; j < Config::GetInstance()->NbGPUs(); j++)
+      HeTM_destroyCurandState(j);
     HeTM_destroy();
-    HeTM_destroyCurandState();
     PR_teardown();
   }
 
@@ -260,44 +271,23 @@ void jobWithCuda_exit(cuda_t * d)
   return;
 }
 
-static void offloadBankTxThread(void *argsPtr)
-{
+static void
+offloadBankTxThread(
+  void *argsPtr
+) {
   offload_bank_tx_thread_s *args = (offload_bank_tx_thread_s*)argsPtr;
-  cuda_t *d = args->d;
+  cuda_t *d = args->d; // array per device
   account_t *a = args->a;
+  int devId = Config::GetInstance()->SelDev();
+  MemObj *m_bankTx = HeTM_bankTx->entryObj->GetMemObj(devId);
+  HeTM_bankTx_s *bankTx_args = (HeTM_bankTx_s*)m_bankTx->host;
 
-  bool err = 1;
-  cudaError_t cudaStatus;
+  HeTM_bankTx->blocks  = (knlman_dim3_s){ .x = d->blockNum,  .y = 1, .z = 1 };
+  HeTM_bankTx->threads = (knlman_dim3_s){ .x = d->threadNum, .y = 1, .z = 1 };
+  bankTx_args->knlArgs.d = d;
+  bankTx_args->knlArgs.a = a;
+  bankTx_args->clbkArgs = NULL;
+  // m_bankTx->CpyHtD(NULL); // TODO: this copy is not necessary
 
-  while (err) {
-    err = 0;
-
-    CHECK_ERROR_CONTINUE(cudaSetDevice(DEVICE_ID));
-
-    knlman_select("HeTM_bankTx");
-    knlman_set_nb_blocks(d->blockNum, 1, 1);
-    knlman_set_nb_threads(d->threadNum, 1, 1);
-
-    HeTM_bankTx_s bankTx_args = {
-      .knlArgs = {
-        .d = d,
-        .a = a,
-      },
-      .clbkArgs = NULL
-    };
-    knlman_set_entry_object(&bankTx_args);
-
-    // TODO: set device
-    knlman_run(NULL); // stream is defined on PR_STM
-    // kernelLaunched = 1;
-    // __sync_synchronize();
-    // printf(" ------------------------ \n");
-
-    //Check for errors
-    cudaStatus = cudaGetLastError();
-  }
-
-  if (cudaStatus != cudaSuccess) {
-    printf("\nTransaction kernel launch failed. Error code: %s.\n", cudaGetErrorString(cudaStatus));
-  }
+  HeTM_bankTx->Run(devId);
 }

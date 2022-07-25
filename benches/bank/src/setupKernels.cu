@@ -2,8 +2,9 @@
 #include "setupKernels.cuh"
 #include "cmp_kernels.cuh"
 #include "bankKernel.cuh"
-#include "memman.hpp"
 #include "bank.hpp"
+
+#include "memman.hpp"
 
 using namespace memman;
 using namespace knlman;

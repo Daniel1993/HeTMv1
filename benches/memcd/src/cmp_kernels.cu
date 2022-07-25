@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include "hetm-log.h"
+
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 

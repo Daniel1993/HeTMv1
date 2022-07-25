@@ -1,33 +1,33 @@
 #include <stdlib.h>
-#include <bsd/stdlib.h>
 #include <stdio.h>
 #include <math.h>
 #include <fenv.h>
 #include <assert.h>
 #include <limits.h>
 #include <string.h>
-#include <time.h>
+// #include <time.h>
 
 #include "graph.h"
 #include "state.h"
 #include "aux.h"
 #include "bb_lib.h"
 
-// #if defined(USE_ROLLBACK)
-// #define BATCH_FACTOR 4
-// #else 
-#define BATCH_FACTOR 0
-// #endif
-
 #define MAX_SCC_FILE "scc%i.in.max_scc"
+
+static const double NB_BATCHES_IN_EXEC =
+#if defined(BATCH_SIZE) && BATCH_SIZE > 0
+  (double)BATCH_SIZE
+#else
+  (double)1.0
+#endif
+;
 
 /* Run a simple branch and bound algorithm */
 
 /* Sorted should be in descending order */
-// TODO: Multi-thread
-/*__thread */BB_s internal_tmp_bb_;
-/*__thread */BB_s internal_bb_;
-static /*__thread */FILE* internal_prof_file_;
+BB_s internal_tmp_bb_;
+BB_s internal_bb_;
+static FILE* internal_prof_file_;
 char graph_filename[128];
 static unsigned long notUsedBudgetBB = 0;
 
@@ -39,114 +39,130 @@ pcmp(
   int i1 = *(int *)p1;
   int i2 = *(int *)p2;
 
-  return internal_tmp_bb_->d[i2] - internal_tmp_bb_->d[i1];
+  return internal_tmp_bb_->d[i1] - internal_tmp_bb_->d[i2];
 }
 
 void
 BB(
   int l, /* Last useful position in order. */
-  int depth
+  int depth,
+  int cost
 ) {
   BB_s bb = internal_bb_;
-  /* if(depth < 62){ */
-  /*   DEB_PRINTF("depth =  %d\n", depth); */
-  /*   DEB_PRINTF("bound =  %d\n\n", bound); */
-  /* } */
-  // printS(bb->s, depth);
 
-  if(depth > bb->bound){
-    bb->bound = depth;
-  }
+  if(cost > bb->bound)
+    bb->bound = cost;
 
-  // if(0 != bb->repOps && 0 == (bb->ops % bb->repOps)) {
-  //   BB_printLine(bb->currSCC, depth);
-  // }
-
-  bb->ops++;
-  (bb->budgetPerSCC[bb->currSCC])--;
-
-  // if (depth > 80000) return; // TODO: stack overflow!
-
-  // printf("-> ");
-  for(int i = l; bb->bound-depth <= i; i--){
-    // if(bb->ops <= bb->n && activate(bb->s[bb->currSCC], bb->order[i])){
-    // TODO: add a score within the state of BB, sbound is now relative to the score
-    if (0 <= bb->budgetPerSCC[bb->currSCC] && BB_activate(bb->s[bb->currSCC], bb->order[i])) {
-      BB(i-1, depth+1);
-
-      if (depth+1 > bb->sbound) {
-        bb->sbound = depth+1;
-        // memcpy(bb->P, getSketch(bb->s), (depth+1+1)*sizeof(int));
+  // if (sigterm_called)
+  //   return;
+  // fprintf(stderr, "BB(%d (%d),%d) bb->bound-depth=%i\n", l, bb->SCCgraphs[bb->currSCC]->d[l], depth, bb->bound-depth);
+  for(int i = l; /* bb->bound-depth <= i */i>=0 && bb->accWeights[i]+cost > bb->bound; i--)
+  {
+    // printf("BB_activate(..., %d (%d))\n", bb->orderL[i], bb->SCCgraphs[bb->currSCC]->d[bb->orderL[i]]);
+    int v = bb->orderL[i];
+    int w = bb->weights[v];
+    // TODO: add bb->accWeights
+      // accumulates the weights from orderL
+    if (BB_activate(bb->s[bb->currSCC], v))
+    {
+      BB(i-1, depth+1, cost+w);
+      if (cost+w > bb->sbound)
+      {
+        // fprintf(stderr, "BB_activate success improve solution i=%i, depth=%i, bb->sbound=%i\n", i, depth, bb->sbound);
+        bb->sbound = cost+w;
         memcpy(bb->vertsPerSCC[bb->currSCC], BB_getSketch(bb->s[bb->currSCC]), (depth+1+1)*sizeof(int));
-        // BB_printLine(bb->currSCC, depth);
+        // int *r = bb->vertsPerSCC[bb->currSCC];
+        // while(*r != -1)
+        //   printf(" %d bb->currSCC = %i (depth+1+1) = %i\n", *(r++), bb->currSCC, (depth+1+1));
+        // printf("\n");
       }
     }
-    BB_deactivate(bb->s[bb->currSCC], bb->order[i]);
-      // printf("(%d) ", bb->order[i]);
+    BB_deactivate(bb->s[bb->currSCC], v);
   }
-  // printf("\n ------------------------------------ \n");
+}
+
+
+void
+BB_setWeights(long *weights)
+{
+  BB_s bb = internal_bb_;
+  int i;
+  for (i = 0; i < bb->G->v; i++)
+    bb->weights[i] = weights[i];
 }
 
 void
 BB_reset(graph G)
 {
   BB_s bb = internal_bb_;
-  int i;
-  graph temp_G = NULL;
-
-  assert(NULL != G);
-  assert(G->v == bb->G->v); // allow only for number of edges to change
-
-  // orderS is the start of the array order (which is incremented in the algo)
-  bb->order = bb->orderS; // TODO: where this should go?
-
-  if (bb->G != G) {
-    temp_G = bb->G;
-    bb->G = G;
+  int i = 0;
+  
+  if (bb->rG)
+  {
+    G->d = bb->G->d; // TODO: move this elsewhere
+    bb->G->d = NULL;
+    bb->rG->d = NULL;
+    while (i < bb->firstOrder[0])
+    {
+      BB_freeS(bb->s[i]);
+      freeG(bb->SCCgraphs[i]);
+      i++;
+    }
+    // freeG(bb->rG); // freed below
+    freeG(bb->G);
   }
+  bb->G = G;
+  bb->rG = sccRestrict(G, bb->firstOrder, bb->SCCsize, bb->SCCnbEdges);
+  bb->rG->d = bb->G->d; // TODO: move this elsewhere
+  
+  // bb->SCCsize = realloc(bb->SCCsize, bb->firstOrder[0]*sizeof(int)); // TODO: not needed?
 
   /* Get sorting criteria */
-  bb->rG = sccRestrict(G, bb->firstOrder, bb->SCCsize, bb->SCCnbEdges);
-  for(i = 0; i < bb->rG->v; i++){
-    // bb->d[i] = degree(bb->rG, i, out);
-    // bb->d[i] *= degree(bb->rG, i, in);
-    bb->d[i] = bb->rG->outDeg[i] * bb->rG->inDeg[i];
-  }
+  for (i = 0; i < bb->rG->v; i++)
+    // bb->d[i] = bb->rG->outDeg[i] * bb->rG->inDeg[i];
+    bb->d[i] = bb->rG->outDeg[i]==0||bb->rG->inDeg[i]==0 ? 0 : bb->rG->outDeg[i]+bb->rG->inDeg[i];
 
   /* Create sub-problem order */
-  memcpy(bb->order, &(bb->firstOrder[1]), bb->G->v*sizeof(int));
+  int *A = &(bb->firstOrder[1]);
+  // memcpy(bb->order, &(bb->firstOrder[1]), bb->rG->v*sizeof(int));
 
-  for (i = 0; i < bb->firstOrder[0]; ++i) {
-    if (bb->SCCsize[i] < 3) {
-      notUsedBudgetBB += 128+((bb->n * bb->SCCsize[i]) / bb->rG->v);
-    }
-  }
-  i=0;
-  while(i < bb->firstOrder[0]) {
+  *bb->vertsPerSCC[0] = 0;
+  i = 0;
+  bb->order = bb->orderS;
+  while (i < bb->firstOrder[0])
+  {
     internal_tmp_bb_ = bb;
     qsort(bb->order, bb->SCCsize[i], sizeof(int), pcmp);
+    bb->SCCgraphs[i] = extractSCC(bb->rG, A, bb->SCCsize[i]);
+    A += bb->SCCsize[i];
     bb->order += bb->SCCsize[i];
-    bb->accSolPerSCC[i] = 0;
-    *(bb->vertsPerSCC[i]) = -1;
-    if (bb->SCCsize[i] < 3) {
-      bb->budgetPerSCC[i] = 2; // 1 should be enough
-    } else {
-      bb->budgetPerSCC[i] = (((bb->n+notUsedBudgetBB)*bb->SCCsize[i])/bb->rG->v) >> BATCH_FACTOR;
-      if (0 >= bb->budgetPerSCC[i]) bb->budgetPerSCC[i] = 128;
+    bb->s[i] = BB_allocS(bb->SCCgraphs[i]);
+    if (i > 0)
+    {
+      bb->vertsPerSCC[i] = bb->vertsPerSCC[i-1] + bb->SCCsize[i-1] + 1;
+      *bb->vertsPerSCC[i] = 0;
     }
-    // printf("%d budget = %ld\n", i, bb->budgetPerSCC[i]);
-    BB_resetS(bb->s[i], G);
     i++;
   }
-  if (NULL != temp_G) {
-    freeG(temp_G);
+  // free(bb->d);
+  // free(bb->firstOrder);
+
+  *(bb->P) = -1; /* Array where the solution is stored. */
+  *(bb->FVS) = -1; /* Array where the solution is stored. */
+  
+  bb->order = bb->orderS;
+  memset(bb->inMaxDag, 0, bb->G->v);
+  while (i < bb->firstOrder[0])
+  {
+    BB_resetS(bb->s[i]);
+    i++;
   }
 }
 
 void
 BB_init_G(BB_parameters_s p, graph G)
 {
-  BB_s bb = (BB_s)malloc(sizeof(struct BB_));
+  BB_s bb = (BB_s)calloc(1, sizeof(struct BB_));
   internal_bb_ = bb;
   internal_prof_file_ = stdout;
   // temp vars, check if we can allocate in the stack
@@ -154,45 +170,32 @@ BB_init_G(BB_parameters_s p, graph G)
   // int d[G->v];
   int i;
 
-  bb->G = G;
   G->d = NULL;
-  bb->G->t = NULL;
-  clock_gettime(CLOCK_MONOTONIC_RAW, &bb->startTime);
+  G->t = NULL;
 
-  bb->accSol = 0;
-  bb->n = p.n; /* Limit number of ops */
-  bb->ops = 0; /* Count the number of iterations */
-  bb->repOps = p.repOps < 1 ? 1 : p.repOps; /* When to report information */
-
-  bb->firstOrder = malloc((1+G->v)*sizeof(int));
-  bb->order = malloc(G->v*sizeof(int));
+  bb->firstOrder = (int*)malloc((1+G->v)*sizeof(int));
+  bb->order = &(bb->firstOrder[1]); // (int*)malloc(G->v*sizeof(int));
   bb->orderS = bb->order;
   bb->orderE = bb->order + G->v;
-  bb->SCCsize = malloc((1+G->v)*sizeof(int));
-  bb->SCCnbEdges = malloc((1+G->v)*sizeof(int));
+  bb->SCCsize = (int*)malloc((1+G->v)*sizeof(int));
+  bb->SCCnbEdges = (int*)malloc((1+G->v)*sizeof(int));
   bb->SCCsize[0] = 0;
+  bb->inMaxDag = (unsigned char*)malloc(G->v*sizeof(unsigned char));
   bb->d = (int *)malloc(G->v*sizeof(int));
-  // bb->SCCsize = realloc(bb->SCCsize, bb->firstOrder[0]*sizeof(int)); // TODO: not needed?
+  bb->weights = (long *)malloc(G->v*sizeof(long));
+  bb->accWeights = (long *)malloc(G->v*sizeof(long));
+  for (int i = 0; i < G->v; ++i)
+    bb->weights[i] = 1;
+  bb->complexSCCs = (int*)malloc(sizeof(int)*(G->v+1));
+  bb->vertsPerSCC = (int**)malloc(/* bb->firstOrder[0] */G->v*sizeof(int*));
+  bb->vertsPerSCC[0] = (int*)malloc((G->v*2)*sizeof(int));
+  bb->orderL = (int*)malloc((G->v)*sizeof(int));
+  bb->P = (int*)malloc((1+G->v)*sizeof(int));
+  bb->FVS = (int*)malloc((1+G->v)*sizeof(int));
+  G->d = (int*)malloc(G->v*sizeof(int)); // TODO: move this elsewhere
 
-  bb->vertsPerSCC = malloc(G->v*sizeof(int*));
-  bb->budgetPerSCC = malloc(G->v*sizeof(long));
-  bb->accSolPerSCC = malloc(G->v*sizeof(int));
-  bb->s = malloc(G->v*sizeof(state));
-
-  bb->vertsPerSCC[0] = malloc((G->v*G->v+G->v)*sizeof(int));
-  i = 0;
-  while(i < G->v) {
-    bb->s[i] = BB_allocS(bb->G); // TODO: this should be per SCC
-    if (i > 0)
-      bb->vertsPerSCC[i] = bb->vertsPerSCC[i-1] + G->v + 1;
-    i++;
-  }
-  // free(bb->d);
-  // free(bb->firstOrder);
-
-  bb->P = malloc((1+G->v)*sizeof(int));
-  bb->FVS = malloc((1+G->v)*sizeof(int));
-  *(bb->P) = -1; /* Array where the solution is stored. */
+  bb->s = malloc(/* bb->firstOrder[0] */G->v*sizeof(state));
+  bb->SCCgraphs = (graph*)malloc(/* bb->firstOrder[0] */G->v*sizeof(graph));
 
   BB_reset(G);
   // return bb;
@@ -201,9 +204,14 @@ BB_init_G(BB_parameters_s p, graph G)
 void
 BB_init_F(BB_parameters_s p, const char *fileName)
 {
-  FILE *stream = fopen(fileName, "r");
+  FILE *stream = NULL;
+  if (fileName)
+    stream = fopen(fileName, "r");
+  if (!stream)
+    stream = stdin;
   graph G = loadG(stream);
-  fclose(stream);
+  if (stream != stdin)
+    fclose(stream);
 
   /*return */BB_init_G(p, G);
 }
@@ -231,16 +239,20 @@ BB_destroy()
   // ... free everything
   for (int i = 0; i < bb->firstOrder[0]; i++) {
     BB_freeS(bb->s[i]);
+    freeG(bb->SCCgraphs[i]);
   }
-  free(bb->budgetPerSCC);
-  free(bb->accSolPerSCC);
+  free(bb->inMaxDag);
   free(bb->vertsPerSCC[0]);
   free(bb->vertsPerSCC);
   free(bb->s);
   free(bb->firstOrder);
   free(bb->d);
+  free(bb->weights);
+  free(bb->complexSCCs);
   free(bb->SCCsize);
-  free(bb->orderS);
+  // free(bb->order);
+  free(bb->orderL);
+  free(bb->SCCgraphs);
   free(bb->P);
   freeG(bb->G); // also frees rG
   free(bb);
@@ -297,165 +309,109 @@ BB_run()
   BB_s bb = internal_bb_;
   int *kP;
   unsigned long int tn;
-  int i;
-  int sboundSave[bb->firstOrder[0]];
-  int boundSave[bb->firstOrder[0]];
-  int SSCsRemaining = bb->firstOrder[0];
-  struct timespec curTime, startTime;
+  int i, j;
 
-  tn = bb->n; /* Total n value */
+  // fprintf(stderr, "BB_run 1\n");
 
-
-#ifdef CHECK_ONLY
-  int nbSCCs = 0;
-  int j = bb->firstOrder[0];
-  int largest_scc = 0;
-  int nbInteresting = 0;
-  int nbVertInteresting = 0;
-  int *order = bb->order;
-  printf("#%s;;;\n", graph_filename);
-  printf("#SCCid;nbVert;nbEdge;\n");
-  while(0 < j) {
-    int nbEdges = 0;
-    j--;
-    order -= bb->SCCsize[j];
-    int *v = order;
-    for(i = 0; i < bb->SCCsize[j]; ++i) {
-      int *outE = bb->rG->E[*v][in];
-      while(*(outE++) != -1) nbEdges++;
-      v++;
+  bb->orderL += bb->G->v;
+  for (i = bb->firstOrder[0] - 1; 0 <= i; i--)
+  {
+    int *vertsPerSCC = bb->vertsPerSCC[i];
+    for (j = 0; j < bb->SCCsize[i]; j++)
+    {
+      *vertsPerSCC = j;
+      bb->orderL--;
+      *bb->orderL = j;
+      vertsPerSCC++;
     }
-    printf("%i;%i;%i;", bb->firstOrder[0] - j, bb->SCCsize[j], nbEdges);
-    if (nbEdges == bb->SCCsize[j]*bb->SCCsize[j]-bb->SCCsize[j]) {
-      printf("\n");
+    if (bb->SCCnbEdges[i] == bb->SCCsize[i]*bb->SCCsize[i]-bb->SCCsize[i])
+    {
+      //! Deal with complete graphs
+      long maxW = 0;
+      int u = -1;
+      for (j = 0; j < bb->SCCsize[i]; j++)
+      {
+        int v = bb->SCCgraphs[i]->d[j];
+        int w = bb->weights[v];
+        if (w > maxW)
+        {
+          maxW = w;
+          u = j;
+        }
+      }
+      // printf("SCC %d is trivial\n", i);
+      // F++;  /* Ignore 1v or 2v SCCs */
+      // with 2v we can just ignore one of them
+      // *vertsPerSCC = bb->order[0]; // translated later
+      *(bb->vertsPerSCC[i]) = u;
+      *(bb->vertsPerSCC[i]+1) = -1;
+      bb->complexSCCs[i] = 0;
     }
-    else {
-      nbInteresting++;
-      nbVertInteresting += bb->SCCsize[j];
-      printf("interesting\n");
+    else 
+    {
+      bb->complexSCCs[i] = 1;
+      *vertsPerSCC = -1;
     }
-    if (bb->SCCsize[j] > bb->SCCsize[largest_scc])
-      largest_scc = j;
-  }
-  printf("# %i interesting SCCs with a total of %i verts \n", nbInteresting, nbVertInteresting);
-  // prune_SCC(largest_scc);
-  bb->order -= bb->rG->v; // free crashes otherwise
-  return;
-#endif
-
-  for (i = bb->firstOrder[0] - 1; 0 <= i; i--) {
-    sboundSave[i] = 0;
-    boundSave[i] = -1;
   }
 
-  bb->ops = 0;
-  int noMoreBudget = 0;
+  int k = 0;
+  for (i = 0; i < bb->firstOrder[0]; ++i)
+  {
+    for (j = 0; j < bb->SCCsize[i]; j++)
+    {
+      bb->accWeights[k] = bb->weights[bb->SCCgraphs[i]->d[j]];
+      if (k > 0)
+        bb->accWeights[k] += bb->accWeights[k-1];
+      k++;
+    }
+  }
+
+  // fprintf(stderr, "BB_run 2\n");
   
-  clock_gettime(CLOCK_MONOTONIC_RAW, &bb->startTime);
-  startTime = bb->startTime;
   bb->order = bb->orderE;
-  while (noMoreBudget < bb->firstOrder[0]) {
-    noMoreBudget = 0;
-    for (i = bb->firstOrder[0] - 1; 0 <= i; i--) {
-      int currSCCScore = bb->accSolPerSCC[i];
-      int *vertsPerSCC = bb->vertsPerSCC[i];
-      bb->currSCCsize = bb->SCCsize[i];
-      bb->order -= bb->SCCsize[i];
-      
-      if (0 >= bb->budgetPerSCC[i]) {
-        noMoreBudget++;
-        continue;
-      }
-
-      bb->accSol -= currSCCScore;
-
-      bb->currSCC = i;
-      bb->sbound = sboundSave[i]; /* Saved bound */
-      bb->bound = boundSave[i];
-      /* Proportional re-distribution of ops */
-
-      // bb->n = (tn*bb->SCCsize[i])/bb->rG->v;
-
-      // BB_printLine(bb->currSCC, bb->sbound);
-
-      // if(1 == bb->SCCsize[i] || 2 == bb->SCCsize[i]) {
-      // printf("SCC %d has #V = %i #E = %i\n", i, bb->SCCsize[i], bb->SCCnbEdges[i]);
-      if(bb->SCCnbEdges[i] == bb->SCCsize[i]*bb->SCCsize[i]-bb->SCCsize[i]) {
-        //! Deal with complete graphs
-        // printf("SCC %d is trivial\n", i);
-        // F++;  /* Ignore 1v or 2v SCCs */
-        // with 2v we can just ignore one of them
-        *vertsPerSCC = bb->order[0];
-        vertsPerSCC++;
-        *vertsPerSCC = -1;
-        bb->budgetPerSCC[i] = 0;
-        noMoreBudget++;
-        bb->accSolPerSCC[i] = 1;
-        bb->accSol += 1;
-        // BB_printLine(bb->currSCC, bb->sbound);
-        continue;
-      }
-
-      BB(bb->SCCsize[i]-1, 0);
-      if (bb->budgetPerSCC[i] > 0) {
-        // still has budget and returned == done with SCC
-        bb->budgetPerSCC[i] = 0;
-        SSCsRemaining = SSCsRemaining == 0 ? SSCsRemaining : SSCsRemaining-1;
-      } else if (bb->ops < tn) {
-        // add more budget
-        bb->budgetPerSCC[i] += ((tn + notUsedBudgetBB - bb->ops) / SSCsRemaining) >> BATCH_FACTOR;
-        if (0 >= bb->budgetPerSCC[i]) bb->budgetPerSCC[i] = 1024;
-      }
-
-      // DEB_PRINTF("\n\n"); /* Double newline for gnuplot */
-
-      // reOrder(bb->s, bb->P);
-      // while(-1 != *bb->P) {
-      //   bb->P++;
-      //   bb->accSol++;
-      // }
-      /* *** */
-      BB_reOrder(bb->s[i], vertsPerSCC);
-      bb->accSolPerSCC[i] = 0;
-      while(-1 != *vertsPerSCC) {
-        vertsPerSCC++;
-        bb->accSolPerSCC[i]++;
-      }
-      bb->accSol += bb->accSolPerSCC[i];
-      sboundSave[i] = bb->sbound; /* Saved bound */
-      boundSave[i] = bb->bound;
-    } /* for each SCC */
-
-    bb->order += bb->rG->v;
+  bb->orderL += bb->G->v;
+  for (i = bb->firstOrder[0] - 1; 0 <= i; i--)
+  {
+    bb->order -= bb->SCCsize[i];
+    bb->orderL -= bb->SCCsize[i];
     
-  } /* noMoreBudget */
-  // BB_printLine(0, bb->sbound);
-  bb->order -= bb->rG->v;
+    if (!bb->complexSCCs[i])
+      continue;
+
+    int *vertsPerSCC = bb->vertsPerSCC[i];
+    bb->currSCCsize = bb->SCCsize[i];
+    
+    bb->currSCC = i;
+    bb->sbound = 0; /* Saved bound */
+    bb->bound = -1;
+
+    BB(bb->SCCsize[i]-1, 0, 0);
+    BB_reOrder(bb->s[i], vertsPerSCC);
+  } /* for each SCC */
 
   kP = bb->P; /* Keep P */
-  for (i = bb->firstOrder[0] - 1; i >= 0; i--) {
+  // printf("\n");
+  for (i = bb->firstOrder[0] - 1; i >= 0; i--)
+  {
+    // fprintf(stderr, "BB_run b1 SCCsize=%i\n", bb->SCCsize[i]);
     int *vertsPerSCC = bb->vertsPerSCC[i];
-    while (*vertsPerSCC != -1) { *(bb->P++) = *(vertsPerSCC++); }
+    while (*vertsPerSCC != -1)
+    {
+      *bb->P = bb->SCCgraphs[i]->d[*vertsPerSCC];
+      // fprintf(stderr, "%i -> %i\n", *vertsPerSCC, *bb->P);
+      bb->P++;
+      vertsPerSCC++;
+    }
+    // fprintf(stderr, "BB_run b2\n");
   }
+  bb->maxDagSize = bb->P - kP;
   *bb->P = -1;
   /* *** */
 
   bb->P = kP; // keep the beginning of the pointer
-  int *fvs = bb->FVS;
-  // TODO: find a more efficient way
-  for (i = 0; i < bb->G->v; ++i) {
-    kP = bb->P; // keep the beginning of the pointer
-    while (*kP != -1) {
-      if (i == *kP) break;
-      kP++;
-    }
-    if (i != *kP) {
-      *fvs = i;
-      fvs++;
-    }
-  }
-  *fvs = -1;
 
+  // fprintf(stderr, "BB_run 3\n");
+  
 // #ifndef CHECK_ONLY
 //   BB_printBestSolution();
 // #endif
@@ -474,42 +430,54 @@ BB_getBestSolution()
   return bb->P;
 }
 
-int*
-BB_getFVS()
-{
-  BB_s bb = internal_bb_;
-  return bb->FVS;
-}
-
 void BB_printHeader()
 {
   fprintf(internal_prof_file_, "# iter\ttime_ms\tscore\tmaxScr\taccScr\tSCCid\tSCCsize\n"); // \tvertPerIt\tcurTemp\tnbDfs
 }
 
-void BB_printLine(int scc_id, int depth)
-{
-  BB_s bb = internal_bb_;
-  struct timespec curTime, startTime = bb->startTime;
-  clock_gettime(CLOCK_MONOTONIC_RAW, &curTime);
-  fprintf(internal_prof_file_, "%ld\t%.3f\t%d\t%d\t%d\t%d\t%d\n",
-    bb->ops,
-    CLOCK_DIFF_MS(startTime, curTime),
-    depth,
-    bb->accSol + bb->bound,
-    bb->accSol,
-    scc_id,
-    bb->SCCsize[scc_id]
-  );
-}
+// void BB_printLine(int scc_id, int depth)
+// {
+//   BB_s bb = internal_bb_;
+//   struct timespec curTime, startTime = bb->startTime;
+//   clock_gettime(CLOCK_MONOTONIC_RAW, &curTime);
+//   fprintf(internal_prof_file_, "%ld\t%.3f\t%d\t%d\t%d\t%d\t%d\n",
+//     bb->ops,
+//     CLOCK_DIFF_MS(startTime, curTime),
+//     depth,
+//     bb->accSol + bb->bound,
+//     bb->accSol,
+//     scc_id,
+//     bb->SCCsize[scc_id]
+//   );
+// }
 
 void BB_printBestSolution()
 {
   BB_s bb = internal_bb_;
   int sol = 0;
-  fprintf(internal_prof_file_, "# best solution: ", sol);
+  fprintf(internal_prof_file_, "# best solution: ");
   for(int *L = BB_getBestSolution(/*bb*/); -1 != *L; L++) {
     fprintf(internal_prof_file_, "%d ", *L);
     sol++;
   }
   fprintf(internal_prof_file_, "(size %i)\n", sol);
+}
+
+int *BB_getFVS()
+{
+  BB_s bb = internal_bb_;
+  int sol = 0;
+  int *L = BB_getBestSolution();
+  int *r = bb->FVS;
+  while (-1 != *L)
+  {
+    // printf("  -MAX_DAG- %i \n", *L);
+    bb->inMaxDag[*L] = 1;
+    L++;
+  }
+  for (int i = 0; bb->G->v > i; i++)
+    if (!bb->inMaxDag[i])
+      *(r++) = i;
+  *r = -1;
+  return bb->FVS;
 }

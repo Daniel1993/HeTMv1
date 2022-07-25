@@ -83,6 +83,9 @@ sccRestrict(graph G,
 	    int *SCCnbEdges
 	    );
 
+graph
+extractSCC(graph G, int *sccList, int lenScc);
+
 void // TODO: move to some utils
 removeOneVertexFromList(int toRem, int *list);
 

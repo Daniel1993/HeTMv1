@@ -13,7 +13,7 @@
 #define HETM_MAX_CMP_KERNEL_LAUNCHES 4
 #define HETM_MAX_CPU_THREADS         64
 #define HETM_PC_BUFFER_SIZE          0x100
-#define CONTINUE_COND (!HeTM_is_stop(0) || HeTM_get_GPU_status(0) != HETM_IS_EXIT)
+#define CONTINUE_COND (!HeTM_is_stop() || HeTM_get_GPU_status(0) != HETM_IS_EXIT)
 
 #define HETM_CMP_DISABLED   0
 #define HETM_CMP_COMPRESSED 1
@@ -135,12 +135,8 @@ typedef struct HeTM_shared_
 {
   // algorithm specific
   HETM_GPU_STATE statusGPU;
-  volatile int stopFlag;
-  volatile int stopAsyncFlag;
   barrier_t GPUBarrier;
   volatile int isInterconflict; // set to 1 when a CPU-GPU conflict is found
-  int *hostInterConflFlag;
-  int *devInterConflFlag;
 
   // memory pool
   void *mempool_hostptr;
@@ -166,7 +162,6 @@ typedef struct HeTM_shared_
   // TODO: is this in use? come up with better naming
   void *bmap_cache_wset_CPU_devptr;
   void *bmap_cache_wset_CPU_hostptr;
-  void *bmap_cache_wset_CPUConfl; // CPU WS | GPU WS
   void *bmap_cache_merged_wset_devptr;
   void *bmap_cache_merged_wset_hostptr;
 
@@ -178,7 +173,6 @@ typedef struct HeTM_shared_
   void *wsetGPUcache_hostptr;
   void *rsetGPUcache;
   void *rsetGPUcache_hostptr;
-  void *bmap_cache_wset_CPUConfl3;
   size_t bmap_cache_wset_CPUSize, bmap_cache_wset_CPUBits;
 
   void *bmap_wset_GPU_devptr[HETM_NB_DEVICES];
@@ -208,7 +202,8 @@ typedef struct HeTM_gshared_
 
   // algorithm specific
   HETM_GPU_STATE statusGPU;
-  int stopFlag, stopAsyncFlag;
+  volatile int stopFlag;
+  volatile int stopAsyncFlag;
   barrier_t CPUBarrier;
   barrier_t nextBatchBarrier;
   barrier_t BBsyncBarrier;
@@ -234,6 +229,7 @@ typedef struct HeTM_gshared_
   int nbOfGPUs;
   void *bmap_wset_GPU_hostptr[HETM_NB_DEVICES];
   char *mat_confl_CPU_unif; // final merged matrix, CPU pre-fill this with its own conflicts
+  long *dev_weights;
 
   // TODO: remove this is benchmark specific
   void *devCurandState; // type is curandState*
@@ -265,7 +261,6 @@ typedef struct HeTM_statistics_ {
   long txsNonBlocking;
   double timeNonBlocking, timeBlocking;
   double timeCMP, timeAfterCMP;
-  unsigned long timeCPUcmp;
   double timeGPU, timePRSTM;
   double timeAbortedBatches;
   double timeDtD;
@@ -377,10 +372,10 @@ int HeTM_join_CPU_threads();
 //----------------------
 
 //---------------------- getters/setters
-#define HeTM_set_is_stop(_devId, isStop)       (HeTM_shared_data[_devId].stopFlag = isStop)
-#define HeTM_is_stop(_devId)                   (HeTM_shared_data[_devId].stopFlag)
-#define HeTM_async_set_is_stop(_devId, isStop) (__atomic_store_n(&HeTM_shared_data[_devId].stopAsyncFlag, isStop, __ATOMIC_RELEASE))
-#define HeTM_async_is_stop(_devId)             (__atomic_load_n(&HeTM_shared_data[_devId].stopAsyncFlag, __ATOMIC_ACQUIRE))
+#define HeTM_set_is_stop(isStop)               (__atomic_store_n(&HeTM_gshared_data.stopFlag, isStop, __ATOMIC_RELEASE))
+#define HeTM_is_stop()                         (__atomic_load_n(&HeTM_gshared_data.stopFlag, __ATOMIC_ACQUIRE))
+#define HeTM_async_set_is_stop(isStop)         (__atomic_store_n(&HeTM_gshared_data.stopAsyncFlag, isStop, __ATOMIC_RELEASE))
+#define HeTM_async_is_stop()                   (__atomic_load_n(&HeTM_gshared_data.stopAsyncFlag, __ATOMIC_ACQUIRE))
 #define HeTM_set_is_interconflict(_devId, val) (HeTM_shared_data[_devId].isInterconflict = val)
 #define HeTM_is_interconflict(_devId)          (HeTM_shared_data[_devId].isInterconflict)
 #define HeTM_set_GPU_status(_devId, status)    (HeTM_shared_data[_devId].statusGPU = status)
@@ -388,6 +383,7 @@ int HeTM_join_CPU_threads();
 
 // resets PR-STM lock table, flags, etc
 int HeTM_reset_GPU_state(long batchCount);
+int HeTM_reset_CPU_state(long batchCount);
 //----------------------
 
 #ifdef __cplusplus

@@ -6,7 +6,7 @@ mkdir -p $DATA_FOLDER
 cd ../../benches/bank
 
 SAMPLES=3
-DURATION_ORG=12000
+DURATION_ORG=20000
 DURATION_GPU=8000
 #./makeTM.sh
 DURATION=$DURATION_ORG
@@ -15,7 +15,7 @@ rm -f Bank.csv
 
 # L_DATASET=150000000
 L_DATASET=1000000
-S_DATASET=15000000
+S_DATASET=150000000
 # CPU_BACKOFF=250
 
 CPU_THREADS=8
@@ -50,7 +50,7 @@ function doRunLargeDTST {
 			-S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 1 CPU_BACKOFF=$CPU_BACKOFF GPU_BACKOFF=$GPU_BACKOFF -X 0.60
 		### TODO: larger batches
 		###
-		mv Bank.csv $DATA_FOLDER/${1}_w${PROB_WRITE}_s${s}
+		mv Bank_LOG.csv $DATA_FOLDER/${1}_w${PROB_WRITE}_s${s}
 	done
 }
 
@@ -61,18 +61,17 @@ function doRunLargeDTST_CPU {
 		# 100M 500M 1G 1.5G
 		timeout 60s ./bank -n $CPU_THREADS -b 80 -x 256 -a $DATASET -d $DURATION -R 0 \
 			-S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 1 CPU_BACKOFF=$CPU_BACKOFF GPU_BACKOFF=$GPU_BACKOFF -X 0.60
-		tail -n 1 Bank.csv > /tmp/BankLastLine.csv
+		tail -n 1 Bank_LOG.csv > /tmp/BankLastLine.csv
 		# for i in `seq 1 7`
 		for i in `seq 1 8`
 		do
-			cat /tmp/BankLastLine.csv >> Bank.csv
+			cat /tmp/BankLastLine.csv >> Bank_LOG.csv
 		done
-		mv Bank.csv $DATA_FOLDER/${1}_w${PROB_WRITE}_s${s}
+		mv Bank_LOG.csv $DATA_FOLDER/${1}_w${PROB_WRITE}_s${s}
 	done
 }
 
-DURATION=$DURATION_GPU
-DATASET=$L_DATASET
+DATASET=$S_DATASET
 # GPU_BACKOFF=800000
 
 ###########################################################################
@@ -80,12 +79,12 @@ DATASET=$L_DATASET
 # make clean ; make CMP_TYPE=COMPRESSED DISABLE_RS=1 USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 \
 # 	BANK_PART=9 BANK_INTRA_CONFL=0.0 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
 # 	BMAP_GRAN_BITS=13 >/dev/null
-./compile.sh opt                       \
-	CMP_TYPE=COMPRESSED                \
+./compile.sh opt                     \
+	CMP_TYPE=0                         \
 	HETM_CPU_EN=0                      \
 	HETM_GPU_EN=1                      \
 	LOG_TYPE=BMAP                      \
-	USE_TSX_IMPL=0                     \
+	USE_TSX_IMPL=1                     \
 	PR_MAX_RWSET_SIZE=200              \
 	BANK_PART=9                        \
 	GPU_PART=0.55                      \
@@ -106,8 +105,8 @@ doRunLargeDTST GPUonly_rand_sep_DISABLED_large
 # make clean ; make INST_CPU=0 GPUEn=0 LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 # 	BANK_PART=9 BANK_INTRA_CONFL=0.0 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
 # 	BMAP_GRAN_BITS=13 >/dev/null
-./compile.sh opt                       \
-	CMP_TYPE=COMPRESSED                \
+./compile.sh opt                     \
+	CMP_TYPE=0                         \
 	HETM_CPU_EN=1                      \
 	HETM_GPU_EN=0                      \
 	LOG_TYPE=BMAP                      \
@@ -122,8 +121,6 @@ doRunLargeDTST GPUonly_rand_sep_DISABLED_large
 	HETM_NB_DEVICES=1
 #
 doRunLargeDTST_CPU CPUonly_rand_sep_DISABLED_large
-
-DURATION=$DURATION_ORG
 
 ############## VERS
 # make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
@@ -179,39 +176,42 @@ DURATION=$DURATION_ORG
 # 	BANK_PART=9 BANK_INTRA_CONFL=0.0 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
 # 	BMAP_GRAN_BITS=13 DISABLE_NON_BLOCKING=0 OVERLAP_CPY_BACK=1 \
 # 	LOG_SIZE=4096 STM_LOG_BUFFER_SIZE=256 >/dev/null
-./compile.sh opt                       \
-	CMP_TYPE=COMPRESSED                \
-	HETM_CPU_EN=1                      \
-	HETM_GPU_EN=1                      \
-	LOG_TYPE=BMAP                      \
-	USE_TSX_IMPL=1                     \
-	PR_MAX_RWSET_SIZE=200              \
-	BANK_PART=9                        \
-	GPU_PART=0.55                      \
-	CPU_PART=0.55                      \
-	P_INTERSECT=0.00                   \
-	PROFILE=1                          \
-	BMAP_GRAN_BITS=13 \
-	HETM_NB_DEVICES=1
-#
-doRunLargeDTST BMAP_rand_sep_1GPU
 
-./compile.sh opt                       \
-	CMP_TYPE=COMPRESSED                \
-	HETM_CPU_EN=1                      \
-	HETM_GPU_EN=1                      \
-	LOG_TYPE=BMAP                      \
-	USE_TSX_IMPL=1                     \
-	PR_MAX_RWSET_SIZE=200              \
-	BANK_PART=9                        \
-	GPU_PART=0.55                      \
-	CPU_PART=0.55                      \
-	P_INTERSECT=0.00                   \
-	PROFILE=1                          \
-	BMAP_GRAN_BITS=13 \
-	HETM_NB_DEVICES=2
-#
-doRunLargeDTST BMAP_rand_sep_2GPU
+# ./compile.sh opt                     \
+# 	CMP_TYPE=COMPRESSED                \
+# 	HETM_CPU_EN=1                      \
+# 	HETM_GPU_EN=1                      \
+# 	LOG_TYPE=BMAP                      \
+# 	USE_TSX_IMPL=1                     \
+# 	PR_MAX_RWSET_SIZE=200              \
+# 	BANK_PART=9                        \
+# 	GPU_PART=0.55                      \
+# 	CPU_PART=0.55                      \
+# 	P_INTERSECT=0.00                   \
+# 	PROFILE=1                          \
+# 	BMAP_ENC_1BIT=1     \
+# 	BMAP_GRAN_BITS=13   \
+# 	HETM_NB_DEVICES=1
+# #
+# doRunLargeDTST BMAP_rand_sep_1GPU
+
+# ./compile.sh opt                     \
+# 	CMP_TYPE=COMPRESSED                \
+# 	HETM_CPU_EN=1                      \
+# 	HETM_GPU_EN=1                      \
+# 	LOG_TYPE=BMAP                      \
+# 	USE_TSX_IMPL=1                     \
+# 	PR_MAX_RWSET_SIZE=200              \
+# 	BANK_PART=9                        \
+# 	GPU_PART=0.70                      \
+# 	CPU_PART=0.35                      \
+# 	P_INTERSECT=0.00                   \
+# 	PROFILE=1                          \
+# 	BMAP_ENC_1BIT=1     \
+# 	BMAP_GRAN_BITS=13   \
+# 	HETM_NB_DEVICES=2
+# #
+# doRunLargeDTST BMAP_rand_sep_2GPU
 
 # make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 # 	BANK_PART=9 BANK_INTRA_CONFL=0.0 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \

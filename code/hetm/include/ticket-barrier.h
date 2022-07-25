@@ -6,6 +6,7 @@ struct ticket_barrier_
 {
 	volatile unsigned count_next;
 	volatile unsigned total;
+	volatile int is_stop;
 	union
 	{
 		struct

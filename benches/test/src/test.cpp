@@ -36,7 +36,6 @@ static int doneCPUThread[TOT_NB_THREADS_CPU];
 
 static void test(int id, void *data)
 {
-	// printf("[%i] passou aqui!\n", id);
 	if (doneCPUThread[id]) return;
 	int pos;
   if (globalState.roundId & 1) {

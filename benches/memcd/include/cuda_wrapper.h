@@ -110,4 +110,5 @@ void jobWithCuda_exit(cuda_t * d);
 unsigned int* readQueue(unsigned int *seed, queue_t *q, int size, int queue_id);
 void queue_Delete(queue_t *q);
 
+
 #endif /* CUDA_WRAPPER_H_GUARD_ */

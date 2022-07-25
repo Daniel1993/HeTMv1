@@ -24,15 +24,15 @@ __global__ void test_kernel(PR_globalKernelArgs)
   int memPos;
   HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)pr_args.pr_args_ext;
 
-  if (input->roundId & 1) {
+  if (input->roundId & 1)
     memPos = idx;
-  } else {
+  else
     memPos = total-idx-1;
-  }
+  
   mempool[memPos] = idx;
 
   memman_access_addr_dev(GPU_log->bmap, &mempool[memPos]); // track GPU writes
-  SET_ON_RS_BMAP(&mempool[memPos]); // read-set
+  SET_ON_RS_BMAP(&mempool[memPos], GPU_log); // read-set
 
 	PR_exitKernel();
 }

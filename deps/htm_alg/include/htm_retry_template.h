@@ -133,20 +133,20 @@ extern __thread int64_t HTM_SGL_errors[HTM_NB_ERRORS];
 
 #define HTM_SGL_write(addr, val) ({ \
 	HTM_SGL_before_write(addr, val); \
-	*((GRANULE_TYPE*)addr) = val; \
+	*((ARCH_GRANULE_TYPE*)(addr)) = val; \
 	HTM_SGL_after_write(addr, val); \
 	val; \
 })
 
 #define HTM_SGL_write_D(addr, val) ({ \
-	GRANULE_TYPE g = CONVERT_GRANULE_D(val); \
-	HTM_SGL_write((GRANULE_TYPE*)addr, g); \
+	ARCH_GRANULE_TYPE g = CONVERT_GRANULE_D(val); \
+	HTM_SGL_write((ARCH_GRANULE_TYPE*)(addr), g); \
 	val; \
 })
 
 #define HTM_SGL_write_P(addr, val) ({ \
-	GRANULE_TYPE g = (GRANULE_TYPE) val; /* works for pointers only */ \
-	HTM_SGL_write((GRANULE_TYPE*)addr, g); \
+	ARCH_GRANULE_TYPE g = (ARCH_GRANULE_TYPE) val; /* works for pointers only */ \
+	HTM_SGL_write((ARCH_GRANULE_TYPE*)(addr), g); \
 	val; \
 })
 
@@ -154,17 +154,17 @@ extern __thread int64_t HTM_SGL_errors[HTM_NB_ERRORS];
 
 #define HTM_SGL_read(addr) ({ \
 	HTM_SGL_before_read(addr); \
-	*((GRANULE_TYPE*)addr); \
+	*((ARCH_GRANULE_TYPE*)(addr)); \
 })
 
 #define HTM_SGL_read_P(addr) ({ \
 	HTM_SGL_before_read(addr); \
-	*((GRANULE_P_TYPE*)addr); \
+	*((ARCH_GRANULE_P_TYPE*)(addr)); \
 })
 
 #define HTM_SGL_read_D(addr) ({ \
 	HTM_SGL_before_read(addr); \
-	*((GRANULE_D_TYPE*)addr); \
+	*((ARCH_GRANULE_D_TYPE*)(addr)); \
 })
 
 /* TODO: persistency assumes an identifier */

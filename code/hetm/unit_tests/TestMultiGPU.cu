@@ -70,7 +70,7 @@ void TestMultiGPU::tearDown() { }
 static void teardownHeTM()
 {
 	printf("[%s]\n", __PRETTY_FUNCTION__);
-	HeTM_set_is_stop(0, 1);
+	HeTM_set_is_stop(1);
 	// HeTM_join_CPU_threads();
 	HeTM_destroy(); // TODO: it will probably crash
 }
@@ -147,19 +147,8 @@ static void cpu_done(int id)
 static void cpu_run(int id, void *argsPtr)
 {
 	callback_args_t *args = (callback_args_t*)argsPtr;
-
 	cpu_init(id);
-
-    // HETM_DEB_THRD_CPU("Thread %i callback", threadId);
-    cpu_tx_access(id, argsPtr); // does 1 transaction
-
-		// TODO: only needed in main loop (async cpy)
-	// for (int j = 0; j < HETM_NB_DEVICES; ++j) {
-	// 	checkCPUCmpDone(j); // Tests if ready
-	// }
-	// pollIsRoundComplete(1);
-
-	// TODO: pollIsRoundComplete must run after CPU and GPU
+	cpu_tx_access(id, argsPtr); // does 1 transaction
 }
 
 TestMultiGPU::TestMultiGPU()  { }

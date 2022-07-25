@@ -22,6 +22,10 @@ AR   = ar rcs
 DEBUG_FLAGS  := -g -lineinfo
 NV_DEB_FLAGS := -G -g -lineinfo
 
+ifeq ($(BMAP_ENC_1BIT),1)
+DEFINES += -DBMAP_ENC_1BIT
+endif
+
 CFLAGS     := -c $(DEFINES) $(INCLUDES) -Wall 
 CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -Wall -std=c++11
 NVFLAGS    := -c $(DEFINES) $(INCLUDES) -std=c++11
@@ -52,6 +56,9 @@ BANK_OBJS  := \
 
 all: $(LIB)
 	# done
+
+test_bandwidth: test_bandwidth.o
+	$(NVCC) $(DEFINES) $(INCLUDES) -std=c++11 -o $@ $<
 
 $(LIB): $(BANK_OBJS)
 	$(AR) $@ $(BANK_OBJS)

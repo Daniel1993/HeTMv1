@@ -14,33 +14,32 @@ extern "C" {
 // typedef struct state_ *state;
 
 struct BB_ {
-  unsigned long long n;// = 1<<20; /* Limit number of ops */
-  unsigned long int ops;// = 0; /* Count the number of iterations */
-  unsigned long int repOps;// = 0; /* When to report information */
-
   graph G; /* Current graph */
   graph rG; /* Restricted graph */
   state *s; /* Current state per SCC */
   int *d; /* Array for storing product degree */
   int *order; /* Array of vertexes by ascending
         product degree. */
+  int *orderL;
   int *orderS;
   int *orderE;
   int *P; /* Copy of the best solution */
-  int *FVS; 
+  int *FVS;
+  int maxDagSize;
   int *firstOrder;
   int *SCCsize;
   int *SCCnbEdges;
+  int *complexSCCs;
+  graph *SCCgraphs;
   int **vertsPerSCC;
-  long *budgetPerSCC;
+  long *weights;
+  long *accWeights;
   int currSCC;
   int currSCCsize;
-  struct timespec startTime;
+  unsigned char *inMaxDag;
 
   int bound; /* Current best value */
   int sbound; /* Stored best bound */
-  int accSol;
-  int *accSolPerSCC;
 };
 
 typedef struct BB_ *BB_s;
@@ -58,6 +57,9 @@ BB_init_F(BB_parameters_s, const char *filename);
 
 void
 BB_reset(graph G);
+
+void
+BB_setWeights(long *weights);
 
 void
 BB_run();

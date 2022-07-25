@@ -27,18 +27,15 @@ struct state_ {
   int *N[2];  /* Current neighbour pointers */
   int *L; /* List of active nodes */
   int *Li; /* Current list element */
-  // long score;
 };
 
 void
-BB_resetS(state s, graph G
-       )
-{
-  assert(G->v == s->G->v);
+BB_resetS(
+  state s
+) {
   s->time = -1;
   s->Li = s->L;
   *(s->Li) = -1;
-  s->G = G;
 }
 
 state
@@ -54,7 +51,7 @@ BB_allocS(graph G
   s->D = (enum adjacencies *)malloc(G->v*sizeof(enum adjacencies));
   s->I = (Queue)malloc(G->v*sizeof(struct Qitem));
   s->L = (int *)malloc((1+G->v)*sizeof(int));
-  BB_resetS(s, G);
+  BB_resetS(s);
 
   return s;
 }
@@ -105,15 +102,17 @@ BB_printS(state s,
 }
 
 static void
-DFSvisit(state s,
-	 int u
-	 )
-{
-  if(1 == s->A[u] && s->C[u] != s->time){
+DFSvisit(
+  state s,
+	int u
+) {
+  if (1 == s->A[u] && s->C[u] != s->time)
+  {
     s->C[u] = s->time; /* Mark node */
 
     int *pv = s->G->E[u][out];
-    while(-1 != *pv){
+    while (-1 != *pv)
+    {
       DFSvisit(s, *pv);
       pv++;
     }
@@ -125,33 +124,40 @@ DFSvisit(state s,
 }
 
 void
-BB_reOrder(state s, /* Current state */
+BB_reOrder(
+  state s, /* Current state */
 	int *C	 /* Current list */
-	)
-{ /* Assume the state is clean */
+) { /* Assume the state is clean */
 
   int *pC = C;
-  while(-1 != *pC){
+  while (-1 != *pC)
+  {
     s->A[*pC] = 1;
     pC++;
   }
+  assert(pC-C <= s->G->v && "List overflow");
 
   /* The only stuff you need is colors */
   s->time++;
-  if(0 == s->time){ /* Reset the BFS related structures */
+  if (0 == s->time) /* Reset the BFS related structures */
+  {
     bzero(s->C, s->G->v*sizeof(int));
     s->time++;
   }
+  assert(0 < s->time && "Time overflow");
 
   pC = C;
-  while(-1 != *pC){
+  while (-1 != *pC)
+  {
     DFSvisit(s, *pC);
     pC++;
   }
+  assert(pC-C <= s->G->v && "List overflow");
 
   /* Clean-up */
   pC = C;
-  while(-1 != *pC){
+  while (-1 != *pC)
+  {
     s->A[*pC] = 0;
 
     s->Li--;
@@ -160,21 +166,26 @@ BB_reOrder(state s, /* Current state */
 
     pC++;
   }
+  assert(pC-C <= s->G->v && "List overflow");
+  assert(s->Li-s->L <= s->G->v && "List overflow");
 }
 
 /* Computed by performing a bidirectional interleaved BFS */
 int
-BB_activate(state s,
-	 int v /* Start vertex */
-	 )
-{ /* Check that there is no loop */
+BB_activate(
+  state s,
+	int v /* Start vertex */
+) { /* Check that there is no loop */
+  
   int cycle = 0;
-
   s->time++;
-  if(0 == s->time){ /* Reset the BFS related structures */
+
+  if (0 == s->time) /* Reset the BFS related structures */
+  {
     bzero(s->C, s->G->v*sizeof(int));
     s->time++;
   }
+  assert(0 < s->time && "Time overflow");
 
   /* Initialize Queues */
   s->Qf[out] = NULL;
@@ -186,29 +197,37 @@ BB_activate(state s,
   s->N[out] = s->G->E[v][out];
   s->N[in] = s->G->E[v][in];
 
-  while(!cycle &&
-        !(-1 == *(s->N[out]) && NULL == s->Qf[out]) &&
-        !(-1 == *(s->N[in]) && NULL == s->Qf[in])
+  while (!cycle &&
+         !(-1 == *(s->N[out]) && NULL == s->Qf[out]) &&
+         !(-1 == *(s->N[in]) && NULL == s->Qf[in])
 	) {
-    for(enum adjacencies d = out; !cycle && d <= in; d++) {
-      if(-1 == *(s->N[d])){ /* End of neighbours */
+    for (enum adjacencies d = out; !cycle && d <= in; d++)
+    {
+      if (-1 == *(s->N[d])) /* End of neighbours */
+      {
         Queue t = s->Qf[d];
         int u = t - s->I;
         s->N[d] = s->G->E[u][d];
         s->Qf[d] = t->next;
         t->next = NULL; /* Clean up */
-      } else { /* Pick next neighbour */
+      }
+      else /* Pick next neighbour */
+      {
         int u = *(s->N[d]);
-        if (1 == s->A[u]) { /* Process only active nodes. */
-          if(s->C[u] == s->time){ /* neighbour already found */
+        if (1 == s->A[u]) /* Process only active nodes. */
+        {
+          if (s->C[u] == s->time) /* neighbour already found */
+          {
             cycle = d != s->D[u];
-          } else { /* Not found yet */
+          }
+          else /* Not found yet */
+          {
             /* Queue management */
             s->I[u].next = NULL;
-            if(NULL != s->Qe[d])
+            if (NULL != s->Qe[d])
               s->Qe[d]->next = &(s->I[u]);
             s->Qe[d] = &(s->I[u]);
-            if(NULL == s->Qf[d])
+            if (NULL == s->Qf[d])
               s->Qf[d] = &(s->I[u]);
 
             s->C[u] = s->time;
@@ -220,27 +239,44 @@ BB_activate(state s,
     }
   }
 
-  if(!cycle){
-    s->A[v] = 1;
+  if (!cycle && 0 == s->A[v])
+  {
+#ifndef NDEBUG
+    int *l = s->Li;
+    while (l-- != s->L)
+    {
+      assert(v != *l && "Repeated vertex in solution");
+      // printf("%d ", *l);
+    }
+    // printf("  (v=%d, s->A[v]=%d)\n", v, s->A[v]);
+#endif
     *(s->Li) = v;
     s->Li++;
     *(s->Li) = -1;
-    // read the weight of the vertex, sum it to sbound 
+    s->A[v] = 1;
+    // printf("Added %i to List\n", v);
+    assert(s->Li-s->L <= s->G->v && "List overflow");
   }
 
   return !cycle;
 }
 
 void
-BB_deactivate(state s,
-	   int v
-	   )
-{
-  if(1 == s->A[v]) {
+BB_deactivate(
+  state s,
+  int v
+) {
+  // printf("BB_deactivate v=%d s->A[v]=%i distL=%d\n", v, s->A[v], s->Li-s->L);
+  if (1 == s->A[v])
+  {
     s->Li--;
     *(s->Li) = -1;
     s->A[v] = 0;
-    // reduce sbound by the score
-    // the weight must be in the graph data struct
+
+    // int *l = s->Li;
+    // while (l-- != s->L)
+    //   printf("%d ", *l);
+    // printf("  (v=%d)\n", v);
   }
+  assert(s->Li >= s->L && "List error, cannot deactivate vertex");
 }

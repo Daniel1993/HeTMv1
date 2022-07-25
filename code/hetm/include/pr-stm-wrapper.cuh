@@ -19,7 +19,7 @@
 
 #include "pr-stm.cuh"
 
-#include "bitmap.h"
+#include "bitmap.hpp"
 #include "memman.hpp"
 #include "hetm.cuh"
 
@@ -58,48 +58,54 @@ typedef struct pr_tx_args_ pr_tx_args_s;
 void hetm_impl_pr_clbk_before_run_ext(pr_tx_args_s *args);
 void hetm_impl_pr_clbk_after_run_ext(pr_tx_args_s *args);
 
-#define SET_ON_RS_BMAP_AUX \
-	void *_RSetBitmap = GPU_log->bmap_rset_devptr; \
-	ByteM_SET_POS(_rpos, _RSetBitmap, GPU_log->batchCount); \
+#ifdef BMAP_ENC_1BIT
+#define SET_ON_RS_BMAP_AUX(_pos, _GPU_log) \
+	BM_SET_POS_GPU(_pos, (_GPU_log)->bmap_rset_devptr); \
 //
-
-#define SET_ON_RS_BMAP_CACHE_AUX \
-	void *_RSetBitmapCache = GPU_log->bmap_rset_cache_devptr; \
+#define SET_ON_RS_BMAP_CACHE_AUX(_pos, _GPU_log) \
 	/* printf("SET_ON_RS_BMAP_CACHE pos %lu\n", _rposCache); */ \
-	ByteM_SET_POS(_rposCache, _RSetBitmapCache, GPU_log->batchCount); \
+	BM_SET_POS_GPU(_pos, (_GPU_log)->bmap_rset_cache_devptr); \
 //
-
-#define SET_ON_WS_BMAP_AUX \
-	void *_WSetBitmap = GPU_log->bmap_wset_devptr; \
-	ByteM_SET_POS(_wpos, _WSetBitmap, GPU_log->batchCount); \
+#define SET_ON_WS_BMAP_AUX(_pos, _GPU_log) \
+	BM_SET_POS_GPU(_pos, (_GPU_log)->bmap_wset_devptr) \
 //
-
-#define SET_ON_WS_BMAP_CACHE_AUX \
-	void *_WSetBitmapCache = GPU_log->bmap_wset_cache_devptr; \
-	ByteM_SET_POS(_wposCache, _WSetBitmapCache, GPU_log->batchCount); \
+#define SET_ON_WS_BMAP_CACHE_AUX(_pos, _GPU_log) \
+	BM_SET_POS_GPU(_pos, (_GPU_log)->bmap_wset_cache_devptr); \
 //
+#else
+#define SET_ON_RS_BMAP_AUX(_pos, _GPU_log) \
+	ByteM_SET_POS(_pos, (_GPU_log)->bmap_rset_devptr, (_GPU_log)->batchCount); \
+//
+#define SET_ON_RS_BMAP_CACHE_AUX(_pos, _GPU_log) \
+	ByteM_SET_POS(_pos, (_GPU_log)->bmap_rset_cache_devptr, (_GPU_log)->batchCount); \
+//
+#define SET_ON_WS_BMAP_AUX(_pos, _GPU_log) \
+	ByteM_SET_POS(_pos, (_GPU_log)->bmap_wset_devptr, (_GPU_log)->batchCount) \
+//
+#define SET_ON_WS_BMAP_CACHE_AUX(_pos, _GPU_log) \
+	ByteM_SET_POS(_pos, (_GPU_log)->bmap_wset_cache_devptr, (_GPU_log)->batchCount); \
+//
+#endif
 
 #ifndef HETM_REDUCED_RS
 #define HETM_REDUCED_RS 0
 #endif /* HETM_REDUCED_RS */
 
-#define  SET_ON_WS_BMAP(_addr) \
-	uintptr_t _wsetAddr = (uintptr_t)(_addr); \
-	uintptr_t _devwBAddr = (uintptr_t)GPU_log->devMemPoolBasePtr; \
-	uintptr_t _wpos = (_wsetAddr - _devwBAddr) >> (PR_LOCK_GRAN_BITS+HETM_REDUCED_RS); \
-	uintptr_t _wposCache = (_wsetAddr - _devwBAddr) >> (PR_LOCK_GRAN_BITS+HETM_REDUCED_RS+BMAP_GRAN_BITS); \
-	SET_ON_WS_BMAP_AUX; \
-	SET_ON_WS_BMAP_CACHE_AUX \
+#define  SET_ON_WS_BMAP(_addr, _GPU_log) ({ \
+	unsigned long pos = ((uintptr_t)(_addr) - (uintptr_t)((_GPU_log)->devMemPoolBasePtr)) >> (PR_LOCK_GRAN_BITS+HETM_REDUCED_RS); \
+	unsigned long posCache = pos >> BMAP_GRAN_BITS; \
+	/* printf("set on WRITE SET pos %li posCache %li in %p\n", pos, posCache, (_GPU_log)->bmap_wset_devptr); */ \
+	SET_ON_WS_BMAP_AUX(pos, _GPU_log); \
+	SET_ON_WS_BMAP_CACHE_AUX(posCache, _GPU_log) \
+}) //
 
-
-#define SET_ON_RS_BMAP(_addr) \
-	uintptr_t _rsetAddr = (uintptr_t)(_addr); \
-	uintptr_t _devrBAddr = (uintptr_t)GPU_log->devMemPoolBasePtr; \
-	uintptr_t _rpos = (_rsetAddr - _devrBAddr) >> (PR_LOCK_GRAN_BITS+HETM_REDUCED_RS); \
-	uintptr_t _rposCache = (_rsetAddr - _devrBAddr) >> (PR_LOCK_GRAN_BITS+HETM_REDUCED_RS+BMAP_GRAN_BITS); \
-	SET_ON_RS_BMAP_AUX; \
-	SET_ON_RS_BMAP_CACHE_AUX \
-//
+#define SET_ON_RS_BMAP(_addr, _GPU_log) ({ \
+	unsigned long pos = ((uintptr_t)(_addr) - (uintptr_t)((_GPU_log)->devMemPoolBasePtr)) >> (PR_LOCK_GRAN_BITS+HETM_REDUCED_RS); \
+	unsigned long posCache = pos >> BMAP_GRAN_BITS; \
+	/* printf("set on READ SET pos %li posCache %li in %p\n", pos, posCache, (_GPU_log)->bmap_rset_devptr); */ \
+	SET_ON_RS_BMAP_AUX(pos, _GPU_log); \
+	SET_ON_RS_BMAP_CACHE_AUX(posCache, _GPU_log) \
+}) //
 
 #define PR_i_rand(args, n) ({ \
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext; \
@@ -119,7 +125,7 @@ void hetm_impl_pr_clbk_after_run_ext(pr_tx_args_s *args);
 #else /* !HETM_DISABLE_RS */
 #define PR_AFTER_VAL_LOCKS_GATHER_READ_SET(_i) \
 	for (_i = 0; _i < args->rset.size; _i++) { \
-		SET_ON_RS_BMAP(args->rset.addrs[_i]); \
+		SET_ON_RS_BMAP(args->rset.addrs[_i], GPU_log); \
 	} \
 //
 #endif /* HETM_DISABLE_RS */
@@ -131,8 +137,8 @@ void hetm_impl_pr_clbk_after_run_ext(pr_tx_args_s *args);
 	for (_i = 0; _i < args->wset.size; _i++) { \
 		/* this is avoided through a memcpy D->D after batch */ \
 		/* memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[_i], GPU_log->batchCount); */ /* TODO */ \
-		SET_ON_RS_BMAP(args->wset.addrs[_i]); \
-		SET_ON_WS_BMAP(args->wset.addrs[_i]); \
+		SET_ON_RS_BMAP(args->wset.addrs[_i], GPU_log); \
+		SET_ON_WS_BMAP(args->wset.addrs[_i], GPU_log); \
 	} \
 //
 #endif /* HETM_DISABLE_WS */

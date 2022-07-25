@@ -23,7 +23,7 @@ include ../../../cuda_location.mak
 
 CFG           ?= prod
 
-include Makefile.defines
+include ./Makefile.defines
 
 INCLUDES := \
 	-I ../include -I $(CUDA_UTIL_DIR)/include \
@@ -33,7 +33,6 @@ INCLUDES := \
 	-I $(CUDA_PATH)/include \
 	-I $(FVS_LIB_DIR) \
 	-I $(PR_STM_DIR)/include
-DEFINES  :=
 LIBS     := \
 	-L $(HETM_ROOT) -lhetm \
 	-L $(CUDA_UTIL_DIR) -lcuda-util \
@@ -97,19 +96,21 @@ alldeps:
 	@echo " ============================================ "
 	@echo " === Building CUDA utils lib "
 	@echo " ============================================ "
-	$(MAKE) --directory $(CUDA_UTIL_DIR) clean
+	$(MAKE) --directory $(CUDA_UTIL_DIR) clean ; \
 	$(MAKE) -j14 --directory $(CUDA_UTIL_DIR) \
+		BMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		CFG=$(CFG) 
-	@echo " ============================================ "
-	@echo " === Building PR-STM lib "
-	@echo " ============================================ "
-	$(MAKE) --directory $(PR_STM_DIR) clean
-	$(MAKE) -j14 --directory $(PR_STM_DIR) \
-		CFG=$(CFG) 
+	# @echo " ============================================ "
+	# @echo " === Building PR-STM lib "
+	# @echo " ============================================ "
+	# $(MAKE) --directory $(PR_STM_DIR) clean ; \
+	# $(MAKE) --directory $(PR_STM_DIR) \
+		# CFG=$(CFG) 
 	@echo " ============================================ "
 	@echo " === Building HeTM lib "
 	@echo " ============================================ "
-	$(MAKE) --directory $(HETM_ROOT) clean
+	$(MAKE) --directory $(HETM_ROOT) clean ; \
 	$(MAKE) -j14 --directory $(HETM_ROOT) \
 		USE_TSX_IMPL=$(USE_TSX_IMPL) \
 		CMP_TYPE=$(CMP_TYPE) \
@@ -119,6 +120,8 @@ alldeps:
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
+		BMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		PRINT_DEB=$(PRINT_DEB) \
 		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
 		HETM_NB_DEVICES=$(HETM_NB_DEVICES) \
@@ -128,7 +131,7 @@ alldeps:
 	@echo " ============================================ "
 	@echo " === Building TinyMOD lib "
 	@echo " ============================================ "
-	$(MAKE) --directory $(TINY_ROOT) clean
+	$(MAKE) --directory $(TINY_ROOT) clean ; \
 	$(MAKE) -j14 --directory $(TINY_ROOT) \
 		USE_TSX_IMPL=$(USE_TSX_IMPL) \
 		CMP_TYPE=$(CMP_TYPE) \
@@ -140,7 +143,7 @@ alldeps:
 	@echo " ============================================ "
 	@echo " === Building TSXMOD lib "
 	@echo " ============================================ "
-	$(MAKE) --directory $(TSX_ROOT) clean
+	$(MAKE) --directory $(TSX_ROOT) clean ; \
 	$(MAKE) -j14 --directory $(TSX_ROOT) \
 		USE_TSX_IMPL=$(USE_TSX_IMPL) \
 		CMP_TYPE=$(CMP_TYPE) \
@@ -152,7 +155,7 @@ alldeps:
 	@echo " ============================================ "
 	@echo " === Building HeTM lib (again) "
 	@echo " ============================================ "
-	$(MAKE) --directory $(HETM_ROOT) clean
+	$(MAKE) --directory $(HETM_ROOT) clean ; \
 	$(MAKE) -j14 --directory $(HETM_ROOT) \
 		USE_TSX_IMPL=$(USE_TSX_IMPL) \
 		CMP_TYPE=$(CMP_TYPE) \
@@ -161,9 +164,11 @@ alldeps:
 		CFG=$(CFG) \
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
+		BMAP_GRAN_BITS=$(BMAP_GRAN_BITS) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		PRINT_DEB=$(PRINT_DEB) \
 		LOG_SIZE=$(LOG_SIZE) \
+		BMAP_ENC_1BIT=$(BMAP_ENC_1BIT) \
 		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
 		STM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE) \
 		HETM_NB_DEVICES=$(HETM_NB_DEVICES) \
@@ -178,6 +183,7 @@ $(PR_STM_DIR)/pr-stm-obj.o:
 	$(MAKE) --directory $(PR_STM_DIR)
 
 %.o: %.cu
+	@echo "$(NVCC) $(NVFLAGS) -o $@ $^"
 	$(NVCC) $(NVFLAGS) -o $@ $^
 
 %.o: %.c

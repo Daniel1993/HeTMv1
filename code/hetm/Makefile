@@ -137,12 +137,12 @@ $(LIB): $(OBJS) ./hetm-inst-cpu.o ./hetm-inst-gpu.o
 hetm-inst-cpu.o: ./src/hetm-inst-cpu.cpp
 	@echo "   >>> Building $@"
 	@# "instrument CPU object (instrument and then compile CPU TM with it)"
-	@$(NVCC) $(NVFLAGS) -o $@ $<
+	$(NVCC) $(NVFLAGS) -o $@ $<
 
 hetm-inst-gpu.o: ./src/hetm-inst-gpu.cu $(DEPS_PR_STM_OBJS)
 	@echo "   >>> Building $@"
 	@# "instrument GPU object (instrument and then compile GPU TM with it)"
-	@$(NVCC) $(NVFLAGS) -o $@ $<
+	$(NVCC) $(NVFLAGS) -o $@ $<
 
 $(DEPS_PR_STM_OBJS):
 	$(MAKE) --directory $(PR_STM_DIR)

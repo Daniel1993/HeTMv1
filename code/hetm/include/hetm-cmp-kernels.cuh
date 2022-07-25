@@ -22,17 +22,13 @@
 
 typedef struct HeTM_knl_global_ {
   void *devMemPoolBasePtr;
-  void *devMemPoolBackupBasePtr;
-  void *devMemPoolBackupBmap;
   void *hostMemPoolBasePtr;
-  int *isInterConfl;
-  size_t explicitLogBlock;
 	size_t nbGranules;
   void *devRSet;
-  void *devRSetCache_hostptr;
+  void *devRSetCache_hostptr[HETM_NB_DEVICES];
   void *devWSet[HETM_NB_DEVICES];
-  void *devWSetCache;
-  void *devWSetCache_hostptr;
+  void *devWSetCache[HETM_NB_DEVICES];
+  void *devWSetCache_hostptr[HETM_NB_DEVICES];
   char *localConflMatrix[HETM_NB_DEVICES];
   void *hostRSet;
   void *hostRSetCache;
@@ -40,11 +36,6 @@ typedef struct HeTM_knl_global_ {
   void *hostWSet;
   void *hostWSetCache_hostptr;
   void *hostWSetCache;
-  void *hostWSetCacheConfl;
-  void *hostWSetCacheConfl2; // TODO: rename with some name that makes actual sense
-  void *mergedWSet;
-  void *mergedWSetCache;
-  void *hostWSetCacheConfl3; // CPU WS | GPU WS, to copy in case of abort
   size_t hostWSetCacheSize;
   size_t hostWSetCacheBits;
 	size_t hostWSetChunks;
@@ -78,14 +69,12 @@ HeTM_knl_global_s *HeTM_get_global_arg(int devId);
 
 // set the size of the explicit log (benchmark dependent), it is equal to
 // the number of writes of a thread (all transactions) in a GPU kernel
-void HeTM_set_explicit_log_block_size(size_t);
-size_t HeTM_get_explicit_log_block_size();
 
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
 
-__global__ void interGPUConflDetect(HeTM_knl_cmp_args_s args, size_t offset);
+__global__ void interGPUConflDetect(HeTM_knl_cmp_args_s args, char *remote_wset, char *my_rset, size_t offset);
 __global__ void CPUGPUConflDetect(HeTM_knl_cmp_args_s args, size_t offset);
 __global__ void CPUrsGPUwsConflDetect(HeTM_knl_cmp_args_s args, size_t offset);
 

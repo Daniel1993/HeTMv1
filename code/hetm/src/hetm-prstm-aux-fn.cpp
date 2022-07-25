@@ -18,7 +18,7 @@ void hetm_impl_pr_clbk_before_run_ext(pr_tx_args_s *args)
 	{
 		HeTM_gpuLog.AddMemObj(m = new MemObj(
 			b.SetSize(sizeof(HeTM_GPU_log_s))
-			->SetOptions(MEMMAN_THRLC)
+			->SetOptions(MEMMAN_NONE)
 			->AllocDevPtr()
 			->AllocHostPtr(), PR_curr_dev
 		));
@@ -58,9 +58,9 @@ void hetm_impl_pr_clbk_before_run_ext(pr_tx_args_s *args)
 	// memman_select("HeTM_gpuLog");
 	args->dev.pr_args_ext = m->dev;
 	// memman_get_gpu(NULL);
-	m->CpyHtD(HeTM_memStream2[PR_curr_dev]);
+	m->CpyHtD(PR_getCurrentStream());
 	// memman_cpy_to_gpu(HeTM_memStream2[PR_curr_dev], NULL, *hetm_batchCount);
-	CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)HeTM_memStream2[PR_curr_dev]), "");
+	// CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)HeTM_memStream2[PR_curr_dev]), "");
 }
 
 void hetm_impl_pr_clbk_after_run_ext(pr_tx_args_s *args) { }

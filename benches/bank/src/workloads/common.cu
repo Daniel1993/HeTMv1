@@ -128,7 +128,7 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 {
 	int id = threadIdx.x+blockDim.x*blockIdx.x;
-	volatile int i = 0;
+	int i = 0;
 	double count_amount = 0;
 	HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
 	PR_GRANULE_T *accounts = (PR_GRANULE_T*)input->accounts;
@@ -136,7 +136,8 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	size_t nbAccounts = input->nbAccounts;
 	int *input_buffer = input->input_buffer;
 	int *output_buffer = input->output_buffer;
-	int option = PR_rand(INT_MAX);
+	// int option = PR_rand(INT_MAX);
+	int option = 0;
 	int tot_nb_threads = blockDim.x*gridDim.x;
 
 	unsigned randNum;
@@ -163,21 +164,32 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	loopFor *= HETM_BANK_PART_SCALE;
 #endif
 
+	// for (i = 0; i < 1; i++) {
+	// 	count_amount += accounts[0];
+	// }
+	// return;
 	// #pragma unroll
 	for (i = 0; i < loopFor; i++) {
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
 			accountIdx = GPU_ACCESS(devId, randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS_SMALLER(devId, randNum, nbAccounts);
+			// if (!(accountIdx >= 0 && accountIdx < nbAccounts))
+			// 	printf("BUG HERE!\n");
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
+			if (id == 0 && i == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
 		}
-		// printf("randNum = %u\n", randNum);
+		// printf("PR_read = %i\n", accountIdx);
 		count_amount += PR_read(accounts + accountIdx);
+		// count_amount += accounts[accountIdx];
 	}
 
 	state[id] = seedState;
@@ -187,18 +199,26 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 		randNum = PR_rand(INT_MAX); // 56; //
 		if (!isInter) {
 			accountIdx = GPU_ACCESS(devId, randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS_SMALLER(devId, randNum, nbAccounts);
+			// if (!(accountIdx >= 0 && accountIdx < nbAccounts))
+			// 	printf("BUG HERE!\n");
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			printf("passou aqui!\n");
-			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
+			if (id == 0 && i == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
 		}
-		// printf("randNum = %u\n", randNum);
+		// if (isInter && i == 0)
+		// 	printf("PR_write = %u\n", accountIdx);
 		// PR_read(accounts + accountIdx);
+		// accountIdx = 0;
 		PR_write(accounts + accountIdx, count_amount * input_buffer[id+txCount*tot_nb_threads]);
+		// accounts[accountIdx] = count_amount * input_buffer[id+txCount*tot_nb_threads];
 	}
 
 	PR_txCommit();
@@ -247,15 +267,20 @@ __device__ void readOnly_tx2(PR_txCallDefArgs, int txCount)
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
 			accountIdx = GPU_ACCESS(devId, randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS_SMALLER(devId, randNum, nbAccounts);
+			// if (!(accountIdx >= 0 && accountIdx < nbAccounts))
+			// 	printf("BUG HERE!\n");
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
+			if (id == 0 && i == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_GPU(devId, randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
 		}
-		// printf("randNum = %u\n", randNum);
 		count_amount += PR_read(accounts + accountIdx);
 	}
 	PR_txCommit();
@@ -462,6 +487,7 @@ __device__ void update_tx_simple(PR_txCallDefArgs, int txCount)
 	int r1 = PR_read(accounts + idx[0]);
 	int r2 = PR_read(accounts + idx[1]);
 
+	// printf("idx[0]=%i idx[2]=%i\n", idx[0], idx[1]);
 	PR_write(accounts + idx[0], r1-amount_to_transfer);
 	PR_write(accounts + idx[1], r2+amount_to_transfer);
 	PR_txCommit();

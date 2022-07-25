@@ -453,11 +453,11 @@ stm_wbctl_commit(stm_tx_t *tx)
   /* Install new versions, drop locks and set new timestamp */
   w = tx->w_set.entries;
   for (i = tx->w_set.nb_entries; i > 0; i--, w++) {
-#ifdef HETM_INSTRUMENT_CPU
+/* #ifdef HETM_INSTRUMENT_CPU
 // #if LOG_AUTO==1 // TODO: do always
     stm_log_newentry(tx->log, (long*)w->addr, w->value, t);
 // #endif
-#endif /*HETM_INSTRUMENT_CPU*/
+#endif */
     if (w->mask == ~(stm_word_t)0) {
       ATOMIC_STORE(w->addr, w->value);
     } else if (w->mask != 0) {

@@ -29,11 +29,11 @@ transfer2(
 ) {
 	int n;
 
-#if BANK_PART == 10
-	void *pos[count*HETM_BANK_PART_SCALE];
-#else
-	void *pos[count];
-#endif
+// #if BANK_PART == 10
+// 	void *pos[count*HETM_BANK_PART_SCALE];
+// #else
+// 	void *pos[count];
+// #endif
 	// void *pos_write;
 	int accountIdx;
 	unsigned seedCopy = someSeed;
@@ -55,11 +55,13 @@ transfer2(
 		randNum = RAND_R_FNC(seedCopy);
 		if (!isInter) {
 			accountIdx = CPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
+			assert(accountIdx >= 0 && accountIdx < nbAccounts);
 		} else {
 			accountIdx = randNum % nbAccounts;
 		}
-		pos[n] = accounts + accountIdx;
-		// __builtin_prefetch(pos[n], 1, 1);
+		// pos[n] = accounts + accountIdx;
+		// __builtin_prefetch(accounts + accountIdx, 1, 1);
 	}
 
   TM_START(/*txid*/0, RW);
@@ -76,16 +78,22 @@ transfer2(
 		randNum = RAND_R_FNC(seedCopy);
 		if (!isInter) {
 			accountIdx = CPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
+			assert(accountIdx >= 0 && accountIdx < nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+			if (tid == 0 && n == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
 		}
-		pos[n] = accounts + accountIdx;
-		int someLoad = TM_LOAD(pos[n]);
+		// pos[n] = accounts + accountIdx;
+		// printf("_TM_LOAD %i\n", accountIdx);
+		int someLoad = TM_LOAD(accounts + accountIdx);
 		count_amount += someLoad;
 		// int someLoad = TM_LOAD(pos[n]);
 		// count_amount += someLoad;
@@ -103,14 +111,21 @@ transfer2(
 		randNum = RAND_R_FNC(seedCopy);
 		if (!isInter) {
 			accountIdx = CPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
+			assert(accountIdx >= 0 && accountIdx < nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+			if (tid == 0 && n == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
 		}
+		// if (isInter && n == 0)
+		// 	printf("_TM_STORE %i, pos = %p\n", accountIdx, accounts + accountIdx);
 		TM_STORE(accounts + accountIdx, count_amount * input);
 		// TM_STORE(pos[n], count_amount * input);
 	}
@@ -156,7 +171,10 @@ readOnly2(
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+			if (tid == 0 && n == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
@@ -387,8 +405,8 @@ int readIntensive(account_t *accounts, volatile unsigned *positions, int count, 
 
 int transferReadOnly(account_t *accounts, volatile unsigned *positions, int count, int amount)
 {
-	uintptr_t load1, load2;
-  	int n, src, dst;
+	uintptr_t load1 = 0, load2 = 0;
+	int n, src, dst;
 
 	for (n = 0; n < count; ++n) {
 		__builtin_prefetch(&accounts[positions[n]], 0, 0);

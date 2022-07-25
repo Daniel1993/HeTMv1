@@ -85,6 +85,8 @@ memman::MemObjBuilder*
 memman::MemObjBuilder::AllocHostPtr()
 {
   CUDA_HOST_ALLOC(m_host, m_size);
+  // m_host = malloc(m_size);
+  // printf("CUDA_HOST_ALLOC %p\n", m_host);
   return this;
 }
 
@@ -126,9 +128,9 @@ memman::MemObj::CpyDtH(
   assert(nullptr != dev  &&  "dev ptr is not defined");
   if (host != dev)
     if (strm)
-      CUDA_CPY_TO_HOST_ASYNC(dev, host, size, s);
+      CUDA_CPY_TO_HOST_ASYNC(host, dev, size, s);
     else
-      CUDA_CPY_TO_HOST(dev, host, size);
+      CUDA_CPY_TO_HOST(host, dev, size);
 }
 
 void
@@ -232,7 +234,9 @@ memman::MemObjCpy::Cpy()
   size_t ret = 0;
   assert(nullptr != dst && "dst not set!");
   assert(nullptr != src && "src not set!");
-  if (force_filter)
+  size_t offset = 0, sz = 0, end = (dst->size + (sz_chunk-1)) / sz_chunk;
+
+  if (force_filter&MEMMAN_FILTER)
   {
     int nbThrs = 256;
 
@@ -240,14 +244,46 @@ memman::MemObjCpy::Cpy()
     {
       int nbBlcks = (size_chunk + (nbThrs-1)) / nbThrs;
       
-      size_t offset = 0;
-      for (int i = 0; offset < dst->size; i++, offset += sz_chunk)
+      for (int i = 0; i < end; i++)
+      {
+        size_t blSz = offset+sz+sz_chunk > dst->size ? sz_chunk - (end*sz_chunk - dst->size) : sz_chunk;
         if (BMAP_CHECK_POS(cache->host, i, filter_val))
         {
-          ret += CpyFilterTemplate(strm, nbThrs, nbBlcks, offset,
-            offset+sz_chunk > dst->size ? sz_chunk - (offset+sz_chunk - dst->size) : sz_chunk);
-          strm = strm == strm1 ? strm2 : strm1;
+          int cond = !((force_filter&MEMMAN_ON_COLLISION) == MEMMAN_ON_COLLISION)
+            || (((force_filter&MEMMAN_ON_COLLISION) == MEMMAN_ON_COLLISION)
+              && BMAP_CHECK_POS(cache2->host, i, filter_val));
+          if (cond)
+          {
+            if (sz)
+            {
+              ret += CpyContiguousTemplate(strm, offset, sz);
+              strm = strm == strm1 ? strm2 : strm1;
+              offset += sz;
+              sz = 0;
+            }
+            ret += CpyFilterTemplate(strm, nbThrs, nbBlcks, offset, blSz);
+            offset += blSz;
+            strm = strm == strm1 ? strm2 : strm1;
+          }
+          else
+          {
+            sz += blSz;
+          }
         }
+        else
+        {
+          if (sz)
+          {
+            ret += CpyContiguousTemplate(strm, offset, sz);
+            strm = strm == strm1 ? strm2 : strm1;
+            offset += sz;
+            sz = 0;
+          }
+          offset += blSz;
+        }
+      }
+      if (sz) // the last block is also flagged
+        ret += CpyContiguousTemplate(strm, offset, sz);
     }
     else
     {
@@ -257,16 +293,15 @@ memman::MemObjCpy::Cpy()
   }
   else if (cache)
   {
-    size_t offset = 0, sz = 0, end = (dst->size + (sz_chunk-1)) / sz_chunk;
-    int sect = 0;
     for (int i = 0; i < end; i++)
     {
-      size_t blSz = offset+sz+size_chunk > dst->size ? sz_chunk - (end*sz_chunk - dst->size) : size_chunk;
-      if (BMAP_CHECK_POS(cache->host, i, filter_val))
+      size_t blSz = offset+sz+sz_chunk > dst->size ? sz_chunk - (end*sz_chunk - dst->size) : sz_chunk;
+      if ((BMAP_CHECK_POS(cache->host, i, filter_val) &&
+          !((force_filter&MEMMAN_ONLY_COLLISION) && !BMAP_CHECK_POS(cache2->host, i, filter_val))) ||
+          ((force_filter&MEMMAN_OVERRIDE) && BMAP_CHECK_POS(cache2->host, i, filter_val)))
         sz += blSz;
       else
       {
-        sect = i;
         if (sz)
         {
           ret += CpyContiguousTemplate(strm, offset, sz);
@@ -317,7 +352,8 @@ apply_BMAP_4B(
     if (id >= (bufferSize >> 2)) return; // bufferSize is *sizeof(int)
     if (BMAP_CHECK_POS(bytes, id, val))
     {
-    //     printf("apply_BMAP: pos=%i dstVal=%i srcVal=%i\n", id, (int)dev_buffer_dst[id], (int)dev_buffer_src[id]);
+        // printf("apply_BMAP_4B: src_p=%p dst_p=%p pos=%i bytes=%i, dstVal=%i srcVal=%i\n",
+        //   dev_buffer_src, dev_buffer_dst, id, (int)bytes[id], (int)dev_buffer_dst[id], (int)dev_buffer_src[id]);
         dev_buffer_dst[id] = dev_buffer_src[id];
     }
 }
@@ -339,7 +375,11 @@ memman::MemObjCpyHtD::CpyFilterTemplate(
   memman::MemObj *m = dev_buffer->GetMemObj(devId);
   int *buf = (int*)m->dev;
   unsigned char fVal = (unsigned char)filter_val;
-  unsigned char *f = (unsigned char*)filter->dev;
+#ifdef BMAP_ENC_1BIT
+  unsigned char *f = (unsigned char*)((uintptr_t)(filter->dev) + ((offset/gran_apply) >> LOG2_32BITS)*sizeof(unsigned));
+#else /* BMAP_ENC_1BIT */
+  unsigned char *f = (unsigned char*)((uintptr_t)(filter->dev) + (offset/gran_apply));
+#endif /* BMAP_ENC_1BIT */
 
   CUDA_CPY_TO_DEV_ASYNC(buf, s, sz, strm);
   if (gran_apply == 1)
@@ -383,7 +423,11 @@ memman::MemObjCpyDtH::CpyFilterTemplate(
   memman::MemObj *m = dev_buffer->GetMemObj(devId);
   int *buf = (int*)m->dev;
   unsigned char fVal = (unsigned char)filter_val;
-  unsigned char *f = (unsigned char*)filter->dev;
+#ifdef BMAP_ENC_1BIT
+  unsigned char *f = (unsigned char*)((uintptr_t)(filter->dev) + ((offset/gran_apply) >> LOG2_32BITS)*sizeof(unsigned));
+#else /* BMAP_ENC_1BIT */
+  unsigned char *f = (unsigned char*)((uintptr_t)(filter->dev) + (offset/gran_apply));
+#endif /* BMAP_ENC_1BIT */
 
   CUDA_CPY_TO_DEV_ASYNC(buf, d, sz, strm);
   if (gran_apply == 1)
@@ -428,16 +472,21 @@ memman::MemObjCpyDtD::CpyFilterTemplate(
   memman::MemObj *m = dev_buffer->GetMemObj(dstId);
   int *buf = (int*)m->dev;
   unsigned char fVal = (unsigned char)filter_val;
-  unsigned char *f = (unsigned char*)filter->dev;
+#ifdef BMAP_ENC_1BIT
+  unsigned char *f = (unsigned char*)((uintptr_t)(filter->dev) + ((offset/gran_apply) >> LOG2_32BITS)*sizeof(unsigned));
+#else /* BMAP_ENC_1BIT */
+  unsigned char *f = (unsigned char*)((uintptr_t)(filter->dev) + (offset/gran_apply));
+#endif /* BMAP_ENC_1BIT */
 
   int aSrcId = GetActualDev(srcId);
   int aDstId = GetActualDev(dstId);
 
   if (aSrcId != aDstId)
-    CUDA_CPY_PtP_ASYNC(buf, dstId, s, srcId, sz, strm);
+    CUDA_CPY_PtP_ASYNC(buf, aDstId, s, aSrcId, sz, strm);
   else
     CUDA_CPY_DtD_ASYNC(buf, s, sz, strm);
 
+  // printf("Copied %zuB from GPU%i (%p) to GPU%i (%p)\n", sz, srcId, buf, dstId, d);
   if (gran_apply == 1)
     apply_BMAP_1B<<<nbBlcks, nbThrs, 0, (cudaStream_t)strm>>>(f, fVal, sz, (unsigned char*)d, (unsigned char*)buf);
   else if (gran_apply == 4)

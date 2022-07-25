@@ -40,13 +40,23 @@ MemObjOnDev HeTM_cpu_wset;
 MemObjOnDev HeTM_cpu_rset_cache;
 MemObjOnDev HeTM_cpu_wset_cache;
 
+#ifdef BMAP_ENC_1BIT
+MemObjOnDev HeTM_gpu_rset_swap;
+MemObjOnDev HeTM_gpu_wset_swap;
+MemObjOnDev HeTM_gpu_rset_cache_swap;
+MemObjOnDev HeTM_gpu_wset_cache_swap;
+MemObjOnDev HeTM_cpu_rset_swap;
+MemObjOnDev HeTM_cpu_wset_swap;
+MemObjOnDev HeTM_cpu_rset_cache_swap;
+MemObjOnDev HeTM_cpu_wset_cache_swap;
+#endif /* BMAP_ENC_1BIT */
+
 MemObjOnDev *HeTM_gpu_wset_ext = nullptr;
 
 MemObjOnDev HeTM_curand_state;
 
 MemObjOnDev HeTM_gpu_confl_mat;
 MemObjOnDev HeTM_gpu_confl_mat_merge;
-
 
 static void init_mempool(size_t pool_size, int opts);
 static void init_RSetWSet(int devId, size_t pool_size);
@@ -91,37 +101,29 @@ int HeTM_mempool_init(size_t pool_size, int opts)
     // args.devMemPoolBackupBasePtr = HeTM_shared_data[j].devMemPoolBackup;
     // args.devMemPoolBackupBmap = ((memman_bmap_s*)HeTM_shared_data[j].devMemPoolBackupBmap)->dev;
     args.hostMemPoolBasePtr  = HeTM_shared_data[j].mempool_hostptr;
-    args.isInterConfl        = HeTM_shared_data[j].devInterConflFlag;
-    args.explicitLogBlock    = HeTM_get_explicit_log_block_size();
     args.nbGranules          = nbGranules; // TODO: granules
     args.devRSet             = HeTM_shared_data[j].bmap_rset_GPU_devptr;
-    args.devRSetCache_hostptr = HeTM_shared_data[j].rsetGPUcache_hostptr;
-    args.devWSetCache         = HeTM_shared_data[j].wsetGPUcache;
-    args.devWSetCache_hostptr = HeTM_gpu_wset_cache.GetMemObj(j)->host;
     for (int k = 0; k < nbGPUs; ++k)
     {
-      args.devWSet[k]        = HeTM_shared_data[j].bmap_wset_GPU_devptr[k];
+      args.devWSetCache_hostptr[k] = HeTM_gpu_wset_cache.GetMemObj(k)->host;
+      args.devRSetCache_hostptr[k] = HeTM_shared_data[k].rsetGPUcache_hostptr;
+      args.devWSetCache[k]         = HeTM_shared_data[k].wsetGPUcache;
+      // args.devWSet[k]              = HeTM_shared_data[j].bmap_wset_GPU_devptr[k];
+      args.devWSet[k]              = HeTM_gpu_wset_ext[k].GetMemObj(j)->dev;
       // TODO: this must go into GPU memory   
       args.localConflMatrix[k] = (char*)(HeTM_shared_data[k].mat_confl_GPU_unif);
     }
-    args.hostRSet            = HeTM_shared_data[j].bmap_rset_CPU_devptr;
+    args.hostRSet              = HeTM_shared_data[j].bmap_rset_CPU_devptr;
     args.hostRSetCache_hostptr = HeTM_shared_data[j].bmap_cache_rset_CPU_hostptr;
-
     // TODO: add merged WSet to reduce copies
-    args.mergedWSet          = HeTM_shared_data[j].bmap_merged_wset_devptr;
-    args.mergedWSetCache     = HeTM_shared_data[j].bmap_cache_merged_wset_devptr;
-
-    args.hostWSet            = HeTM_shared_data[j].bmap_wset_CPU_hostptr;
-    args.hostWSetCache       = HeTM_shared_data[j].bmap_cache_wset_CPU_devptr;
+    args.hostWSet              = HeTM_shared_data[j].bmap_wset_CPU_hostptr;
+    args.hostWSetCache         = HeTM_shared_data[j].bmap_cache_wset_CPU_devptr;
     args.hostWSetCache_hostptr = HeTM_shared_data[j].bmap_cache_wset_CPU_hostptr;
-    args.hostWSetCacheConfl  = HeTM_shared_data[j].bmap_cache_wset_CPUConfl; // TODO: rename host to dev
-    // args.hostWSetCacheConfl2 = HeTM_shared_data[j].bmap_cache_wset_CPUConfl2;
-    args.hostWSetCacheConfl3 = HeTM_shared_data[j].bmap_cache_wset_CPUConfl3;
-    args.hostWSetCacheSize   = nbChunks;
-    args.hostWSetCacheBits   = HeTM_shared_data[j].bmap_cache_wset_CPUBits;
-    args.hostWSetChunks      = nbChunks;
-    args.randState           = HeTM_shared_data[j].devCurandState;
-    args.isGPUOnly           = (HeTM_gshared_data.isCPUEnabled == 0);
+    args.hostWSetCacheSize     = nbChunks;
+    args.hostWSetCacheBits     = HeTM_shared_data[j].bmap_cache_wset_CPUBits;
+    args.hostWSetChunks        = nbChunks;
+    args.randState             = HeTM_shared_data[j].devCurandState;
+    args.isGPUOnly             = (HeTM_gshared_data.isCPUEnabled == 0);
     // args.GPUwsBmap           = mainBMap->dev;
 
     HeTM_set_global_arg(j, args);
@@ -133,41 +135,50 @@ int HeTM_mempool_init(size_t pool_size, int opts)
 
 int HeTM_mempool_destroy(int devId)
 { // TODO: free's are bogus
-  // cudaFree(HeTM_mempool.GetMemObj(devId)->dev);
-  // // if (devId == 0)
-  // //   free(HeTM_mempool.GetMemObj(devId)->host);
-  // // delete HeTM_mempool.GetMemObj(devId);
+  cudaFree(HeTM_mempool.GetMemObj(devId)->dev);
+  if (devId == 0)
+    cudaFreeHost(HeTM_mempool.GetMemObj(devId)->host);
+  delete HeTM_mempool.GetMemObj(devId);
 
   // cudaFree(HeTM_gpuLog.GetMemObj(devId)->dev);
   // // free(HeTM_gpuLog.GetMemObj(devId)->host);
   // // delete HeTM_gpuLog.GetMemObj(devId);
 
-  // cudaFree(HeTM_gpu_rset.GetMemObj(devId)->dev);
-  // // cudaFree(HeTM_gpu_rset.GetMemObj(devId)->host);
-  // // delete HeTM_gpu_rset.GetMemObj(devId);
+  cudaFree(HeTM_gpu_rset.GetMemObj(devId)->dev);
+  cudaFreeHost(HeTM_gpu_rset.GetMemObj(devId)->host);
+  delete HeTM_gpu_rset.GetMemObj(devId);
 
-  // cudaFree(HeTM_gpu_rset_cache.GetMemObj(devId)->dev);
-  // // free(HeTM_gpu_rset_cache.GetMemObj(devId)->host);
-  // // delete HeTM_gpu_rset_cache.GetMemObj(devId);
+  cudaFree(HeTM_gpu_rset_cache.GetMemObj(devId)->dev);
+  cudaFreeHost(HeTM_gpu_rset_cache.GetMemObj(devId)->host);
+  delete HeTM_gpu_rset_cache.GetMemObj(devId);
 
-  // cudaFree(HeTM_cpu_rset.GetMemObj(devId)->dev);
-  // // free(HeTM_cpu_rset.GetMemObj(devId)->host);
-  // // delete HeTM_cpu_rset.GetMemObj(devId);
+  cudaFree(HeTM_cpu_rset.GetMemObj(devId)->dev);
+  if (devId == 0)
+    cudaFreeHost(HeTM_cpu_rset.GetMemObj(devId)->host);
+  delete HeTM_cpu_rset.GetMemObj(devId);
 
-  // cudaFree(HeTM_cpu_wset.GetMemObj(devId)->dev);
-  // // free(HeTM_cpu_wset.GetMemObj(devId)->host);
-  // // delete HeTM_cpu_wset.GetMemObj(devId);
+  cudaFree(HeTM_cpu_wset.GetMemObj(devId)->dev);
+  if (devId == 0)
+    cudaFreeHost(HeTM_cpu_wset.GetMemObj(devId)->host);
+  delete HeTM_cpu_wset.GetMemObj(devId);
 
-  // // cudaFree(HeTM_cpu_wset_cache.GetMemObj(devId)->dev);
-  // // free(HeTM_cpu_wset_cache.GetMemObj(devId)->host);
-  // // delete HeTM_cpu_wset_cache.GetMemObj(devId);
+  cudaFree(HeTM_cpu_wset_cache.GetMemObj(devId)->dev);
+  if (devId == 0)
+    cudaFreeHost(HeTM_cpu_wset_cache.GetMemObj(devId)->host);
+  delete HeTM_cpu_wset_cache.GetMemObj(devId);
 
-  // for (int i = 0; i < HETM_NB_DEVICES; ++i) {
-  //   if (devId != i && HeTM_shared_data[devId].bmap_wset_GPU_devptr[i]) {
-  //     cudaFree(HeTM_shared_data[devId].bmap_wset_GPU_devptr[i]);
-  //     HeTM_shared_data[devId].bmap_wset_GPU_devptr[i] = NULL;
-  //   }
-  // }
+  for (int i = 0; i < HETM_NB_DEVICES; ++i) {
+    if (i != devId)
+    {
+      cudaFree(HeTM_gpu_wset_ext[devId].GetMemObj(i)->dev);
+      delete HeTM_gpu_wset_ext[devId].GetMemObj(i);
+    }
+  }
+
+  if (devId == 0)
+    free(HeTM_gshared_data.dev_weights);
+  // if (devId == HETM_NB_DEVICES-1) // TODO: erases things that it shouldnt
+  //   delete [] HeTM_gpu_wset_ext;
   return 0;
 }
 
@@ -267,26 +278,148 @@ void* HeTM_map_cpu_to_cpu(int devId, void *origin)
   return (void*)(o - dev + host);
 }
 
+#ifdef BMAP_ENC_1BIT
+static void
+memzero_cpu_bmap_async(void *a)
+{
+  MemObj *m_swap_cpu_rset       = HeTM_cpu_rset_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_rset_cache = HeTM_cpu_rset_cache_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_wset       = HeTM_cpu_wset_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_wset_cache = HeTM_cpu_wset_cache_swap.GetMemObj(0);
+  m_swap_cpu_rset->ZeroHost();
+  m_swap_cpu_rset_cache->ZeroHost();
+  m_swap_cpu_wset->ZeroHost();
+  m_swap_cpu_wset_cache->ZeroHost();
+}
+#endif
+
+static void
+memzero_cpu_bmap(void *a)
+{
+  MemObj *m_cpu_rset       = HeTM_cpu_rset.GetMemObj(0);
+  MemObj *m_cpu_rset_cache = HeTM_cpu_rset_cache.GetMemObj(0);
+  MemObj *m_cpu_wset       = HeTM_cpu_wset.GetMemObj(0);
+  MemObj *m_cpu_wset_cache = HeTM_cpu_wset_cache.GetMemObj(0);
+#ifdef BMAP_ENC_1BIT
+  MemObj *m_swap_cpu_rset       = HeTM_cpu_rset_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_rset_cache = HeTM_cpu_rset_cache_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_wset       = HeTM_cpu_wset_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_wset_cache = HeTM_cpu_wset_cache_swap.GetMemObj(0);
+  void *swap_cpu_rset       = m_swap_cpu_rset->host;
+  void *swap_cpu_rset_cache = m_swap_cpu_rset_cache->host;
+  void *swap_cpu_wset       = m_swap_cpu_wset->host;
+  void *swap_cpu_wset_cache = m_swap_cpu_wset_cache->host;
+  // m_cpu_rset->ZeroHost();   // TODO: put this in background
+  // m_cpu_rset_cache->ZeroHost();
+  // m_cpu_wset->ZeroHost();
+  // m_cpu_wset_cache->ZeroHost();
+  m_cpu_rset->host       = swap_cpu_rset;
+  m_cpu_rset_cache->host = swap_cpu_rset_cache;
+  m_cpu_wset->host       = swap_cpu_wset;
+  m_cpu_wset_cache->host = swap_cpu_wset_cache;
+  RUN_ASYNC(memzero_cpu_bmap_async, NULL);
+#else
+  m_cpu_rset->ZeroHost();
+  m_cpu_rset_cache->ZeroHost();
+  m_cpu_wset->ZeroHost();
+  m_cpu_wset_cache->ZeroHost();
+#endif
+}
+
+int HeTM_reset_CPU_state(long batchCount)
+{
+#ifdef BMAP_ENC_1BIT
+  MemObj *m_swap_cpu_rset       = HeTM_cpu_rset_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_rset_cache = HeTM_cpu_rset_cache_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_wset       = HeTM_cpu_wset_swap.GetMemObj(0);
+  MemObj *m_swap_cpu_wset_cache = HeTM_cpu_wset_cache_swap.GetMemObj(0);
+  stm_rsetCPU      = m_swap_cpu_rset->host;
+  stm_rsetCPUCache = m_swap_cpu_rset_cache->host;
+  stm_wsetCPU      = m_swap_cpu_wset->host;
+  stm_wsetCPUCache = m_swap_cpu_wset_cache->host;
+  __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
+
+#ifndef BMAP_ENC_1BIT
+  if ((batchCount & 0xff) == 0xff)
+  {
+#endif
+    memzero_cpu_bmap(NULL);
+    // HeTM_async_request((HeTM_async_req_s){
+    //   .args = NULL,
+    //   .fn = memzero_cpu_bmap,
+    // });
+#ifndef BMAP_ENC_1BIT
+  }
+#endif
+  return 0;
+}
+
 int HeTM_reset_GPU_state(long batchCount)
 {
-  // size_t s;
-  // CUDA_CHECK_ERROR(cudaMemset(PR_lockTableDev, 0, PR_LOCK_TABLE_SIZE*sizeof(int)), "");
-  for (int i = 0; i < HETM_NB_DEVICES; ++i)
+  int nbGPUs = Config::GetInstance()->NbGPUs();
+
+  for (int i = 0; i < nbGPUs; ++i)
   {
+#ifndef BMAP_ENC_1BIT
     if ((batchCount & 0xff) == 0xff)
-    { // at some round --> reset
+    {
+#endif /* BMAP_ENC_1BIT */
+      // at some round --> reset
       Config::GetInstance()->SelDev(i);
       HeTM_gpu_rset.GetMemObj(i)->ZeroDev(HeTM_memStream[i]);
       HeTM_gpu_rset_cache.GetMemObj(i)->ZeroDev(HeTM_memStream[i]);
       HeTM_gpu_wset.GetMemObj(i)->ZeroDev(HeTM_memStream[i]);
       HeTM_gpu_wset_cache.GetMemObj(i)->ZeroDev(HeTM_memStream[i]);
+#ifndef BMAP_ENC_1BIT
     }
+#endif /* BMAP_ENC_1BIT */
   }
-  for (int i = 0; i < HETM_NB_DEVICES; ++i)
+
+#ifdef BMAP_ENC_1BIT
+  for (int i = 0; i < nbGPUs; ++i)
+  {
+    HeTM_knl_global_s *knlGlobal = HeTM_get_global_arg(i);
+    knlGlobal->devRSet = HeTM_gpu_rset_swap.GetMemObj(i)->dev;
+    // TODO: read-set cache not set?
+    // knlGlobal->devRSetCache = HeTM_gpu_rset_cache.GetMemObj(i)->dev;
+    knlGlobal->devWSet[i] = HeTM_gpu_wset_swap.GetMemObj(i)->dev;
+    knlGlobal->devWSetCache[i] = HeTM_gpu_wset_cache_swap.GetMemObj(i)->dev;
+  }
+  // swap bitmaps
+  for (int i = 0; i < nbGPUs; ++i)
+  {
+    MemObj *m_gpu_rset       = HeTM_gpu_rset.GetMemObj(i);
+    MemObj *m_gpu_rset_cache = HeTM_gpu_rset_cache.GetMemObj(i);
+    MemObj *m_gpu_wset       = HeTM_gpu_wset.GetMemObj(i);
+    MemObj *m_gpu_wset_cache = HeTM_gpu_wset_cache.GetMemObj(i);
+    MemObj *m_swap_gpu_rset       = HeTM_gpu_rset_swap.GetMemObj(i);
+    MemObj *m_swap_gpu_rset_cache = HeTM_gpu_rset_cache_swap.GetMemObj(i);
+    MemObj *m_swap_gpu_wset       = HeTM_gpu_wset_swap.GetMemObj(i);
+    MemObj *m_swap_gpu_wset_cache = HeTM_gpu_wset_cache_swap.GetMemObj(i);
+    void *swap_gpu_rset       = m_swap_gpu_rset->dev;
+    void *swap_gpu_rset_cache = m_swap_gpu_rset_cache->dev;
+    void *swap_gpu_wset       = m_swap_gpu_wset->dev;
+    void *swap_gpu_wset_cache = m_swap_gpu_wset_cache->dev;
+    m_swap_gpu_rset->dev       = m_gpu_rset->dev;
+    m_swap_gpu_rset_cache->dev = m_gpu_rset_cache->dev;
+    m_swap_gpu_wset->dev       = m_gpu_wset->dev;
+    m_swap_gpu_wset_cache->dev = m_gpu_wset_cache->dev;
+    m_gpu_rset->dev       = swap_gpu_rset;
+    m_gpu_rset_cache->dev = swap_gpu_rset_cache;
+    m_gpu_wset->dev       = swap_gpu_wset;
+    m_gpu_wset_cache->dev = swap_gpu_wset_cache;
+    HeTM_shared_data[i].bmap_rset_GPU_devptr = swap_gpu_rset;
+  }
+#endif /* BMAP_ENC_1BIT */
+
+#ifndef BMAP_ENC_1BIT
+  for (int i = 0; i < nbGPUs; ++i)
   {
     Config::GetInstance()->SelDev(i);
     CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)HeTM_memStream[i]), "");
   }
+#endif /* BMAP_ENC_1BIT */
   return 0;
 }
 /* 
@@ -349,10 +482,20 @@ static void init_RSetWSet(int devId, size_t pool_size)
   sizeRSetLog = pool_size / PR_LOCK_GRANULARITY;
   size_t cacheSize = (sizeRSetLog + (CACHE_GRANULE_SIZE-1)) / CACHE_GRANULE_SIZE;
 
+#ifdef BMAP_ENC_1BIT
+  cacheSize = (cacheSize + 7) / 8;
+  sizeRSetLog = (sizeRSetLog + 7) / 8;
+  MemObjBuilder b_cpu_rset_swap;
+  MemObjBuilder b_cpu_rset_cache_swap;
+  MemObjBuilder b_gpu_rset_swap;
+  MemObj *m_cpu_rset_swap;
+  MemObj *m_cpu_rset_cache_swap;
+  MemObj *m_gpu_rset_swap;
+#endif /* BMAP_ENC_1BIT */
+
   MemObjBuilder b_cpu_rset;
   MemObjBuilder b_cpu_rset_cache;
   MemObjBuilder b_gpu_rset;
-
   MemObj *m_cpu_rset;
   MemObj *m_cpu_rset_cache;
   MemObj *m_gpu_rset;
@@ -365,6 +508,36 @@ static void init_RSetWSet(int devId, size_t pool_size)
   .SetSize(cacheSize)
   ->SetOptions(0)
   ->AllocDevPtr();
+
+#ifdef BMAP_ENC_1BIT
+  b_cpu_rset_swap
+    .SetSize(sizeRSetLog)
+    ->SetOptions(0);
+  if (devId == 0)
+    b_cpu_rset_swap.AllocHostPtr();
+  else
+    b_cpu_rset_swap.SetHostPtr(HeTM_cpu_rset_swap.GetMemObj(0)->host);
+  m_cpu_rset_swap = new MemObj(&b_cpu_rset_swap, devId);
+  m_cpu_rset_swap->ZeroHost();
+  HeTM_cpu_rset_swap.AddMemObj(m_cpu_rset_swap);
+  b_cpu_rset_cache_swap
+    .SetSize(cacheSize)
+    ->SetOptions(0);
+  if (devId == 0)
+    b_cpu_rset_cache_swap.AllocHostPtr();
+  else
+    b_cpu_rset_cache_swap.SetHostPtr(HeTM_cpu_rset_swap.GetMemObj(0)->host);
+  m_cpu_rset_cache_swap = new MemObj(&b_cpu_rset_cache_swap, devId);
+  m_cpu_rset_cache_swap->ZeroHost();
+  HeTM_cpu_rset_cache_swap.AddMemObj(m_cpu_rset_cache_swap);
+  m_gpu_rset_swap = new MemObj(b_gpu_rset_swap
+    .SetSize(sizeRSetLog)
+    ->SetOptions(0)
+    ->AllocDevPtr(),
+  devId);
+  m_gpu_rset_swap->ZeroDev();
+  HeTM_gpu_rset_swap.AddMemObj(m_gpu_rset_swap);
+#endif /* BMAP_ENC_1BIT */
 
   if (0 == devId)
   {
@@ -412,35 +585,62 @@ static void init_multi_GPU(int devId, size_t pool_size)
 {
   // TODO: there is some bug with the memory allocation
   size_t nbGranules = pool_size / PR_LOCK_GRANULARITY;
+  size_t sizeRSetLog = nbGranules;
   size_t cacheSize = (nbGranules + (CACHE_GRANULE_SIZE-1)) / CACHE_GRANULE_SIZE;
   int nbOfGPUs = 0;
 
   Config::GetInstance()->SelDev(devId);
   nbOfGPUs = HeTM_gshared_data.nbOfGPUs = Config::GetInstance()->NbGPUs();
 
+#ifdef BMAP_ENC_1BIT
+  cacheSize = (cacheSize + 7) / 8;
+  sizeRSetLog = (sizeRSetLog + 7) / 8;
+  MemObjBuilder b_gpu_rset_cache_swap;
+  MemObjBuilder b_gpu_wset_cache_swap;
+  MemObj *m_gpu_rset_cache_swap;
+  MemObj *m_gpu_wset_cache_swap;
+#endif /* BMAP_ENC_1BIT */
+
   MemObjBuilder b_gpu_rset_cache;
   MemObjBuilder b_gpu_wset_cache;
   MemObjBuilder b_gpu_wset_DIAG;
 
   // TODO: move the caches out of unified memory eventually
-  b_gpu_rset_cache
-    .SetSize(cacheSize)
-    ->SetOptions(0)
-    ->AllocUnifMem();
   // b_gpu_rset_cache
   //   .SetSize(cacheSize)
   //   ->SetOptions(0)
-  //   ->AllocHostPtr()
-  //   ->AllocDevPtr();
-  b_gpu_wset_cache
+  //   ->AllocUnifMem();
+  b_gpu_rset_cache
     .SetSize(cacheSize)
     ->SetOptions(0)
-    ->AllocUnifMem();
+    ->AllocHostPtr()
+    ->AllocDevPtr();
   // b_gpu_wset_cache
   //   .SetSize(cacheSize)
   //   ->SetOptions(0)
-  //   ->AllocHostPtr()
-  //   ->AllocDevPtr();
+  //   ->AllocUnifMem();
+  b_gpu_wset_cache
+    .SetSize(cacheSize)
+    ->SetOptions(0)
+    ->AllocHostPtr()
+    ->AllocDevPtr();
+
+#ifdef BMAP_ENC_1BIT
+  m_gpu_rset_cache_swap = new MemObj(b_gpu_rset_cache_swap
+    .SetSize(sizeRSetLog)
+    ->SetOptions(0)
+    ->AllocDevPtr(),
+  devId);
+  m_gpu_rset_cache_swap->ZeroDev();
+  HeTM_gpu_rset_cache_swap.AddMemObj(m_gpu_rset_cache_swap);
+  m_gpu_wset_cache_swap = new MemObj(b_gpu_wset_cache_swap
+    .SetSize(cacheSize)
+    ->SetOptions(0)
+    ->AllocDevPtr(),
+  devId);
+  m_gpu_wset_cache_swap->ZeroDev();
+  HeTM_gpu_wset_cache_swap.AddMemObj(m_gpu_wset_cache_swap);
+#endif /* BMAP_ENC_1BIT */
 
   MemObj *m_gpu_rset_cache = new MemObj(&b_gpu_rset_cache, devId);
   MemObj *m_gpu_wset_cache = new MemObj(&b_gpu_wset_cache, devId);
@@ -451,18 +651,28 @@ static void init_multi_GPU(int devId, size_t pool_size)
   HeTM_shared_data[devId].rsetGPUcache_hostptr = m_gpu_rset_cache->host;
 
   if (nullptr == HeTM_gpu_wset_ext)
-  {
-    HeTM_gpu_wset_ext = new MemObjOnDev[nbOfGPUs*nbOfGPUs];
-  }
+    HeTM_gpu_wset_ext = new MemObjOnDev[nbOfGPUs];
 
+#ifdef BMAP_ENC_1BIT
+  MemObjBuilder b_swap_gpu_wset_DIAG;
+  b_swap_gpu_wset_DIAG
+    .SetSize(sizeRSetLog)
+    ->SetOptions(0)
+    ->AllocDevPtr();
+  MemObj *m_swap_gpu_wset_DIAG = new MemObj(&b_swap_gpu_wset_DIAG, devId);
+  HeTM_gpu_wset_swap.AddMemObj(m_swap_gpu_wset_DIAG);
+#endif
   b_gpu_wset_DIAG
-    .SetSize(nbGranules)
+    .SetSize(sizeRSetLog)
     ->SetOptions(0)
     ->AllocDevPtr()
     ->AllocHostPtr();
   MemObj *m_gpu_wset_DIAG = new MemObj(&b_gpu_wset_DIAG, devId);
-  HeTM_gpu_wset_ext[devId*nbOfGPUs+devId].AddMemObj(m_gpu_wset_DIAG);
+  HeTM_shared_data[devId].bmap_wset_GPU_devptr[devId] = m_gpu_wset_DIAG->dev;
+  HeTM_gpu_wset_ext[devId].AddMemObj(m_gpu_wset_DIAG);
   HeTM_gpu_wset.AddMemObj(m_gpu_wset_DIAG);
+  // HeTM_gpu_wset_ext[/*local*/0, /*rem*/0].Add(0)
+  // HeTM_gpu_wset_ext[/*local*/1, /*rem*/1].Add(1)
 
   for (int j = 0; j < nbOfGPUs; ++j)
   {
@@ -473,15 +683,18 @@ static void init_multi_GPU(int devId, size_t pool_size)
     MemObj *m_gpu_wset;
 
     m_gpu_wset = new MemObj(b_gpu_wset
-      .SetSize(nbGranules)
+      .SetSize(sizeRSetLog)
       ->SetOptions(0)
       ->AllocDevPtr()
       ->SetHostPtr(m_gpu_wset_DIAG->host),
       devId
     );
 
-    HeTM_shared_data[devId].bmap_wset_GPU_devptr[j] = m_gpu_wset->dev;
-    HeTM_gpu_wset_ext[devId*nbOfGPUs+j].AddMemObj(m_gpu_wset);
+    // printf("alloc dev HeTM_gpu_wset_ext[%i] devId = %i j = %i\n", devId*nbOfGPUs+j, devId, j);
+    HeTM_shared_data[j].bmap_wset_GPU_devptr[devId] = m_gpu_wset->dev;
+    HeTM_gpu_wset_ext[j].AddMemObj(m_gpu_wset);
+    // HeTM_gpu_wset_ext[/*local*/0, /*rem*/1].Add(0)
+    // HeTM_gpu_wset_ext[/*local*/1, /*rem*/0].Add(1)
   }
 
   MemObjBuilder b_gpu_confl_mat;
@@ -503,6 +716,10 @@ static void init_multi_GPU(int devId, size_t pool_size)
   HeTM_gpu_confl_mat_merge.AddMemObj(m_gpu_confl_mat_merge);
   m_gpu_confl_mat_merge->ZeroDev();
   HeTM_gshared_data.mat_confl_CPU_unif = (char*)m_gpu_confl_mat_merge->host;
+
+  HeTM_gshared_data.dev_weights = (long*)malloc(sizeof(long)*(nbOfGPUs+1));
+  for (int i = 0; i < nbOfGPUs+1; i++)
+    HeTM_gshared_data.dev_weights[i] = 1;
 }
 
 static void init_bmap(int devId, size_t pool_size)
@@ -524,6 +741,13 @@ static void init_bmap(int devId, size_t pool_size)
   MemObj *m_cpu_wset;
   MemObjBuilder b_cpu_wset_cache;
   MemObj *m_cpu_wset_cache;
+
+#ifdef BMAP_ENC_1BIT
+  MemObjBuilder b_swap_cpu_wset;
+  MemObj *m_swap_cpu_wset;
+  MemObjBuilder b_swap_cpu_wset_cache;
+  MemObj *m_swap_cpu_wset_cache;
+#endif
 
   if (devId == 0)
   { // TODO: assumes devId==0 is called first
@@ -549,6 +773,20 @@ static void init_bmap(int devId, size_t pool_size)
     HeTM_cpu_wset.AddMemObj(m_cpu_wset);
     m_cpu_wset->ZeroDev();
     m_cpu_wset->ZeroHost();
+#ifdef BMAP_ENC_1BIT
+    b_swap_cpu_wset_cache
+      .SetSize(cacheSize)
+      ->SetOptions(0)
+      ->AllocHostPtr();
+    m_swap_cpu_wset_cache = new MemObj(&b_swap_cpu_wset_cache, 0);
+    HeTM_cpu_wset_cache_swap.AddMemObj(m_swap_cpu_wset_cache);
+    b_swap_cpu_wset
+      .SetSize(nbGranules)
+      ->SetOptions(0)
+      ->AllocHostPtr();
+    m_swap_cpu_wset = new MemObj(&b_swap_cpu_wset, 0);
+    HeTM_cpu_wset_swap.AddMemObj(m_swap_cpu_wset);
+#endif /* BMAP_ENC_1BIT */
 
     HeTM_shared_data[devId].bmap_wset_CPU_devptr = m_cpu_wset->dev;
     HeTM_shared_data[devId].bmap_wset_CPU_hostptr = m_cpu_wset->host;

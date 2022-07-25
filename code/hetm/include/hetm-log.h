@@ -6,6 +6,12 @@
 // #include "pr-stm-wrapper.cuh"
 
 #include "chunked-log.h"
+#include "arch.h"
+
+#ifndef HETM_MAX_THREADS
+#define HETM_MAX_THREADS 128 // TODO: used somewhere else
+#endif
+#define HETM_BUFFER_MAXSIZE 128
 
 // TODO: these don't go through
 #define HETM_VERS_LOG  1
@@ -129,6 +135,16 @@ stm_log_newentry(HETM_LOG_T *log, long* pos, int val, long vers);
 /* Add value to log */
 /*static inline*/ void
 stm_log_read_entry(long* pos);
+
+extern __thread HETM_LOG_T *HeTM_log;
+extern __thread void* volatile HeTM_bufAddrs[HETM_BUFFER_MAXSIZE];
+extern __thread uintptr_t HeTM_bufVal[HETM_BUFFER_MAXSIZE];
+extern __thread uintptr_t HeTM_bufVers[HETM_BUFFER_MAXSIZE];
+extern __thread void* volatile HeTM_bufAddrs_reads[HETM_BUFFER_MAXSIZE];
+extern __thread uintptr_t HeTM_version;
+extern __thread size_t HeTM_ptr_reads;
+extern __thread size_t HeTM_ptr;
+extern __thread uint64_t HeTM_htmRndSeed;
 
 #ifdef __cplusplus
 }

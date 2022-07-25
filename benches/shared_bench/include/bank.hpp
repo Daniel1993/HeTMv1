@@ -24,7 +24,7 @@
 #include "shared.h"
 #include "hetm-timer.h"
 #include "memman.hpp"
-#include "bitmap.h"
+#include "bitmap.hpp"
 
 #ifndef PR_GRANULE_T // TODO put this somewhere else
 #define PR_GRANULE_T        int
@@ -395,17 +395,23 @@ int bank_sum(bank_t *bank);
 #define CPU_ACCESS(r, size) \
 	RANDOM_ACCESS(r, NO_INTERSECT_CPU_BOT_IDX(size), NO_INTERSECT_CPU_TOP_IDX(size)) \
 //
+#define CPU_ACCESS_SMALLER(r, size) \
+	RANDOM_ACCESS(r, NO_INTERSECT_CPU_TOP_IDX(size)-(long)(0.001*size), NO_INTERSECT_CPU_TOP_IDX(size)) \
+//
 #define GPU_ACCESS(_devId, r, size) \
 	RANDOM_ACCESS(r, NO_INTERSECT_GPU_BOT_IDX(_devId, size), NO_INTERSECT_GPU_TOP_IDX(_devId, size)) \
+//
+#define GPU_ACCESS_SMALLER(_devId, r, size) \
+	RANDOM_ACCESS(r, NO_INTERSECT_GPU_BOT_IDX(_devId, size), NO_INTERSECT_GPU_BOT_IDX(_devId, size)+(long)(0.001*size)) \
 //
 #define INTERSECT_ACCESS(r, size) \
 	RANDOM_ACCESS(r, INTERSECT_BOT_IDX(size), INTERSECT_TOP_IDX(size)) \
 //
 #define INTERSECT_ACCESS_GPU(_devId, r, size) \
-	RANDOM_ACCESS(r, GPU_BOT_IDX(_devId, size), INTERSECT_TOP_IDX(size)) \
+	RANDOM_ACCESS(r, INTERSECT_BOT_IDX(size)/* GPU_BOT_IDX(_devId, size) */, INTERSECT_TOP_IDX(size)) \
 //
 #define INTERSECT_ACCESS_CPU(r, size) \
-	RANDOM_ACCESS(r, INTERSECT_BOT_IDX(size), CPU_TOP_IDX(size)) \
+	RANDOM_ACCESS(r, INTERSECT_BOT_IDX(size), INTERSECT_TOP_IDX(size)/* CPU_TOP_IDX(size) */) \
 //
 
 // if not "Hot" is Medium

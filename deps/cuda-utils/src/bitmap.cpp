@@ -1,11 +1,13 @@
-#include "bitmap.h"
+#include "bitmap.hpp"
 
 #define BREAK_AT 20
 
-int bitmap_print(unsigned short *bitmap, size_t size, FILE *fp) {
-
-
-  
+int
+bitmap_print(
+  unsigned short *bitmap,
+  size_t size,
+  FILE *fp
+) {
   int i, bitsToOne = 0, bitsToZero = 0, j = 0;
   fprintf(fp, "bitmap (size=%zu): \n", size);
   for (i = size / sizeof(short) - 1; i >= 0 ; --i) {

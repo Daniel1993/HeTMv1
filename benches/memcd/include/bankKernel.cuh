@@ -18,6 +18,7 @@
 // TODO: extend PR-STM here in order to have the logs...
 #include "cmp_kernels.cuh"
 #include "bank.hpp"
+#include "knlman.hpp"
 // #include "tx_queue.cuh" // TODO: memcd
 
 /****************************************************************************

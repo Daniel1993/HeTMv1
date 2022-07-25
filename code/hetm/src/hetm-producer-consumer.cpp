@@ -59,7 +59,7 @@ long hetm_pc_produce(hetm_pc_s *pc, void *i)
 	semaphore_wait(pc->p_sem);
 	readPtr = HETM_PC_ATOMIC_INC_PTR(pc->p_ptr, pc->nb_items);
 	COMPILER_FENCE();
-	while (*BUFFER_ADDR(pc, readPtr) != NULL) pthread_yield();
+	while (*BUFFER_ADDR(pc, readPtr) != NULL) /* pthread_yield() */;
 	*BUFFER_ADDR(pc, readPtr) = i;
 	semaphore_post(pc->c_sem); // memory barrier
 	return readPtr;
@@ -71,7 +71,7 @@ long hetm_pc_consume(hetm_pc_s *pc, void **i)
 	semaphore_wait(pc->c_sem);
 	readPtr = HETM_PC_ATOMIC_INC_PTR(pc->c_ptr, pc->nb_items);
 	COMPILER_FENCE();
-	while ((*i = *BUFFER_ADDR(pc, readPtr)) == NULL) pthread_yield();
+	while ((*i = *BUFFER_ADDR(pc, readPtr)) == NULL) /* pthread_yield() */;
 	*BUFFER_ADDR(pc, readPtr) = NULL; // reset value
 	semaphore_post(pc->p_sem); // memory barrier
 	return readPtr;
