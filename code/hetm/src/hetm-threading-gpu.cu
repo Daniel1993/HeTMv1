@@ -645,13 +645,13 @@ mergeMatricesAndRunFVS(
   BB_reset(G);
 
   // set weights here
-  for (int i = 0; i < nbGPUs+1; i++)
+  /* for (int i = 0; i < nbGPUs+1; i++)
   {
     if (i == nbGPUs)
       printf("CPU did %li TXs\n", lastRoundTXs[i]);
     else
       printf("GPU did %li TXs\n", lastRoundTXs[i]);
-  }
+  } */
 
   for (int i = 0; i < nbGPUs+1; i++)
     HeTM_gshared_data.dev_weights[i] = lastRoundTXs[i];
