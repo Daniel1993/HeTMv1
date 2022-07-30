@@ -17,8 +17,10 @@ PROFILE=1
 BMAP_GRAN_BITS=13
 HETM_NB_DEVICES=2
 DISABLE_RS=0
+DISABLE_WS=0
 BANK_INTRA_CONFL=0
 BMAP_ENC_1BIT=0
+INST_CPU=1
 
 for var in "$@"
 do
@@ -49,6 +51,9 @@ make                                                                \
 	LOG_TYPE=$LOG_TYPE                                                \
 	HETM_CPU_EN=$HETM_CPU_EN                                          \
 	HETM_GPU_EN=$HETM_GPU_EN                                          \
+	DISABLE_RS=$DISABLE_RS                                            \
+	DISABLE_WS=$DISABLE_WS                                            \
+	INST_CPU=$INST_CPU                                                \
 	USE_TSX_IMPL=$USE_TSX_IMPL                                        \
 	PR_MAX_RWSET_SIZE=$PR_MAX_RWSET_SIZE                              \
 	BANK_PART=$BANK_PART                                              \
@@ -74,6 +79,9 @@ make                                                                \
 	LOG_TYPE=$LOG_TYPE                                                \
 	HETM_CPU_EN=$HETM_CPU_EN                                          \
 	HETM_GPU_EN=$HETM_GPU_EN                                          \
+	DISABLE_RS=$DISABLE_RS                                            \
+	DISABLE_WS=$DISABLE_WS                                            \
+	INST_CPU=$INST_CPU                                                \
 	USE_TSX_IMPL=$USE_TSX_IMPL                                        \
 	PR_MAX_RWSET_SIZE=$PR_MAX_RWSET_SIZE                              \
 	BANK_PART=$BANK_PART                                              \

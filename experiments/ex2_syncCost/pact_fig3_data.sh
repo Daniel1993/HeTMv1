@@ -177,41 +177,41 @@ doRunLargeDTST_CPU CPUonly_rand_sep_DISABLED_large
 # 	BMAP_GRAN_BITS=13 DISABLE_NON_BLOCKING=0 OVERLAP_CPY_BACK=1 \
 # 	LOG_SIZE=4096 STM_LOG_BUFFER_SIZE=256 >/dev/null
 
-# ./compile.sh opt                     \
-# 	CMP_TYPE=COMPRESSED                \
-# 	HETM_CPU_EN=1                      \
-# 	HETM_GPU_EN=1                      \
-# 	LOG_TYPE=BMAP                      \
-# 	USE_TSX_IMPL=1                     \
-# 	PR_MAX_RWSET_SIZE=200              \
-# 	BANK_PART=9                        \
-# 	GPU_PART=0.55                      \
-# 	CPU_PART=0.55                      \
-# 	P_INTERSECT=0.00                   \
-# 	PROFILE=1                          \
-# 	BMAP_ENC_1BIT=1     \
-# 	BMAP_GRAN_BITS=13   \
-# 	HETM_NB_DEVICES=1
-# #
-# doRunLargeDTST BMAP_rand_sep_1GPU
+./compile.sh opt                     \
+	CMP_TYPE=COMPRESSED                \
+	HETM_CPU_EN=1                      \
+	HETM_GPU_EN=1                      \
+	LOG_TYPE=BMAP                      \
+	USE_TSX_IMPL=1                     \
+	PR_MAX_RWSET_SIZE=200              \
+	BANK_PART=9                        \
+	GPU_PART=0.55                      \
+	CPU_PART=0.55                      \
+	P_INTERSECT=0.00                   \
+	PROFILE=1                          \
+	BMAP_ENC_1BIT=1     \
+	BMAP_GRAN_BITS=13   \
+	HETM_NB_DEVICES=1
+#
+doRunLargeDTST BMAP_rand_sep_1GPU
 
-# ./compile.sh opt                     \
-# 	CMP_TYPE=COMPRESSED                \
-# 	HETM_CPU_EN=1                      \
-# 	HETM_GPU_EN=1                      \
-# 	LOG_TYPE=BMAP                      \
-# 	USE_TSX_IMPL=1                     \
-# 	PR_MAX_RWSET_SIZE=200              \
-# 	BANK_PART=9                        \
-# 	GPU_PART=0.70                      \
-# 	CPU_PART=0.35                      \
-# 	P_INTERSECT=0.00                   \
-# 	PROFILE=1                          \
-# 	BMAP_ENC_1BIT=1     \
-# 	BMAP_GRAN_BITS=13   \
-# 	HETM_NB_DEVICES=2
-# #
-# doRunLargeDTST BMAP_rand_sep_2GPU
+./compile.sh opt                     \
+	CMP_TYPE=COMPRESSED                \
+	HETM_CPU_EN=1                      \
+	HETM_GPU_EN=1                      \
+	LOG_TYPE=BMAP                      \
+	USE_TSX_IMPL=1                     \
+	PR_MAX_RWSET_SIZE=200              \
+	BANK_PART=9                        \
+	GPU_PART=0.70                      \
+	CPU_PART=0.35                      \
+	P_INTERSECT=0.00                   \
+	PROFILE=1                          \
+	BMAP_ENC_1BIT=1     \
+	BMAP_GRAN_BITS=13   \
+	HETM_NB_DEVICES=2
+#
+doRunLargeDTST BMAP_rand_sep_2GPU
 
 # make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 # 	BANK_PART=9 BANK_INTRA_CONFL=0.0 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \

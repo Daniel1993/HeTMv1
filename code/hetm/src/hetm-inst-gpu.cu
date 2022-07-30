@@ -16,15 +16,19 @@ PR_DEVICE void PR_after_val_locks_EXT (PR_args_s *args)
 #if HETM_CMP_TYPE == HETM_CMP_DISABLED
 /* empty */
 #else /* HETM_CMP_TYPE != HETM_CMP_DISABLED */
-    int i;
+	int i;
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext;
+	#ifndef HETM_DISABLE_RS
 	PR_AFTER_VAL_LOCKS_GATHER_READ_SET(i); // TODO: only with more than 1 device
+	#endif
 	// expands to:
 	// for (i = 0; i < args->rset.size; i++) {
 	// 	SET_ON_RS_BMAP(args->rset.addrs[i]);
 	// }
 
+	#ifndef HETM_DISABLE_WS
 	PR_AFTER_VAL_LOCKS_GATHER_WRITE_SET(i);
+	#endif
 	// expands to:
 	// for (i = 0; i < args->wset.size; i++) {
 	// 	SET_ON_RS_BMAP(args->wset.addrs[i]);

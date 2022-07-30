@@ -2,7 +2,6 @@
 
 TARGET_FOLDER=/Users/daniel/Documents/Data/HeTM_2022_July_extention/2GPUS/1st_fig_NEW_no_conf_100w_non_condensed
 OLDER_FOLDER=/Users/daniel/Documents/Data/HeTM_2022_July_extention/2GPUS/1st_fig_OLD_no_conf_100w_non_condensed
-REMOTE_FOLDER=/home/dcastro/projs/HeTM_V1/experiments/ex2_syncCost/data
 source ../aux_files/vars.sh
 
 cp $OLDER_FOLDER/SHeTM_* $TARGET_FOLDER/

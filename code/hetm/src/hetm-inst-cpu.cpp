@@ -54,30 +54,24 @@ HETM_LOG_T* stm_log_init()
 void
 stm_log_newentry(HETM_LOG_T *log, long* pos, int val, long vers)
 {
-#if !defined(HETM_CMP_TYPE) || HETM_CMP_TYPE != HETM_CMP_DISABLED
-  // TODO: only writing in dev0 need to copy from dev0 CPU data to other GPUs
+#ifdef HETM_INSTRUMENT_CPU
   long posBmap = BMAP_CONVERT_ADDR(stm_baseMemPool[0], pos, 2);
   long posBmap_cache = BMAP_CONVERT_ADDR(stm_baseMemPool[0], pos, CACHE_GRANULE_BITS+2);
   // printf("WRITE_LOG pos %li cache pos %li (pos=%p)\n", posBmap, posBmap_cache, pos);
   SET_POS_CPU(posBmap, stm_wsetCPU, *hetm_batchCount);
   SET_POS_CPU(posBmap_cache, stm_wsetCPUCache, *hetm_batchCount);
-  // memman_access_addr_gran(stm_wsetCPU, stm_baseMemPool[0], pos, 1, 2/*4B*/, *hetm_batchCount);
-  // memman_access_addr_gran(stm_wsetCPUCache, stm_baseMemPool[0], pos, 1, CACHE_GRANULE_BITS+2/*4B*/, *hetm_batchCount);
 #endif
 }
 
 void
 stm_log_read_entry(long* pos)
 {
-#if !defined(HETM_CMP_TYPE) || HETM_CMP_TYPE != HETM_CMP_DISABLED
+#ifdef HETM_INSTRUMENT_CPU
   long posBmap = BMAP_CONVERT_ADDR(stm_baseMemPool[0], pos, 2);
   long posBmap_cache = BMAP_CONVERT_ADDR(stm_baseMemPool[0], pos, CACHE_GRANULE_BITS+2);
   // printf("READ_LOG pos %li cache pos %li\n", posBmap, posBmap_cache);
   SET_POS_CPU(posBmap, stm_rsetCPU, *hetm_batchCount);
   SET_POS_CPU(posBmap_cache, stm_rsetCPUCache, *hetm_batchCount);
-  // memman_access_addr_gran(stm_rsetCPU, stm_baseMemPool[0], pos, 1, 2/*4B*/, *hetm_batchCount);
-  // memman_access_addr_gran(stm_rsetCPUCache, stm_baseMemPool[0], pos, 1,
-  //   CACHE_GRANULE_BITS+2/*cache_gran+4B*/, *hetm_batchCount);
 #endif
 }
 
