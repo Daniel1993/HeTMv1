@@ -332,7 +332,7 @@ int bank_sum(bank_t *bank);
  * Granule pool bounds
  * ################################################################### */
 
-#define INTERVAL_GAP 10/*nb of granules*/
+#define INTERVAL_GAP 0/*nb of granules*/
 
 //   Memory access layout
 // +------------------+--------------+

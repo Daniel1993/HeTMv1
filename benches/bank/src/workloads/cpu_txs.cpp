@@ -51,18 +51,18 @@ transfer2(
 	seedCopy  = someSeed;
 	seedState = someSeed;
 
-	for (n = 0; n < count; n++) {
-		randNum = RAND_R_FNC(seedCopy);
-		if (!isInter) {
-			accountIdx = CPU_ACCESS(randNum, nbAccounts);
-			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
-			assert(accountIdx >= 0 && accountIdx < nbAccounts);
-		} else {
-			accountIdx = randNum % nbAccounts;
-		}
-		// pos[n] = accounts + accountIdx;
-		// __builtin_prefetch(accounts + accountIdx, 1, 1);
-	}
+	// for (n = 0; n < count; n++) {
+	// 	randNum = RAND_R_FNC(seedCopy);
+	// 	if (!isInter) {
+	// 		accountIdx = CPU_ACCESS(randNum, nbAccounts);
+	// 		// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
+	// 		assert(accountIdx >= 0 && accountIdx < nbAccounts);
+	// 	} else {
+	// 		accountIdx = randNum % nbAccounts;
+	// 	}
+	// 	// pos[n] = accounts + accountIdx;
+	// 	// __builtin_prefetch(accounts + accountIdx, 1, 1);
+	// }
 
   TM_START(/*txid*/0, RW);
 
@@ -79,7 +79,7 @@ transfer2(
 		if (!isInter) {
 			accountIdx = CPU_ACCESS(randNum, nbAccounts);
 			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
-			assert(accountIdx >= 0 && accountIdx < nbAccounts);
+			// assert(accountIdx >= 0 && accountIdx < nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
@@ -125,7 +125,7 @@ transfer2(
 #endif /* BANK_PART == 9 */
 		}
 		// if (isInter && n == 0)
-		// 	printf("_TM_STORE %i, pos = %p\n", accountIdx, accounts + accountIdx);
+		// printf("_TM_STORE %i\n", accountIdx);
 		TM_STORE(accounts + accountIdx, count_amount * input);
 		// TM_STORE(pos[n], count_amount * input);
 	}

@@ -270,11 +270,13 @@ do { \
 	PR_afterCommit_EXT(PR_txCallArgs); \
 	if (!pr_args.is_abort) { \
 		if (args.nbCommits[args.devId] != NULL) { \
-			atomicInc(&(args.nbCommits[args.devId][pr_args.tid + blockDim.x*gridDim.x*pr_args.current_stream]), 0x7FFFFFFF); \
+			args.nbCommits[args.devId][pr_args.tid + blockDim.x*gridDim.x*pr_args.current_stream] += 1; \
+			/* atomicInc(&(args.nbCommits[args.devId][pr_args.tid + blockDim.x*gridDim.x*pr_args.current_stream]), 0x7FFFFFFF); */ \
 		} \
 	} else { \
 		if (args.nbAborts[args.devId] != NULL) { \
-			atomicInc(&(args.nbAborts[args.devId][pr_args.tid + blockDim.x*gridDim.x*pr_args.current_stream]), 0x7FFFFFFF); \
+			args.nbAborts[args.devId][pr_args.tid + blockDim.x*gridDim.x*pr_args.current_stream] += 1; \
+			/* atomicInc(&(args.nbAborts[args.devId][pr_args.tid + blockDim.x*gridDim.x*pr_args.current_stream]), 0x7FFFFFFF); */ \
 		} \
 	} \
 } while (pr_args.is_abort); \
@@ -342,11 +344,11 @@ do { \
 // TODO: put an _mpause
 #define PR_waitKernel(args) \
 while(PR_WAIT_START_COND) { \
-	/*asm("" ::: "memory")*//*pthread_yield();*/ \
+	/*asm("" ::: "memory")*/ /*pthread_yield();*/ \
 } \
 PR_CHECK_CUDA_ERROR(cudaStreamSynchronize(PR_global[PR_curr_dev].PR_streams[PR_global[PR_curr_dev].PR_currentStream]), ""); \
 while(PR_WAIT_FINISH_COND) { /* this should not be needed */ \
-	/*asm("" ::: "memory")*//*pthread_yield();*/ \
+	/*asm("" ::: "memory")*/ /*pthread_yield();*/ \
 } \
 PR_AFTER_WAIT(args); \
 //

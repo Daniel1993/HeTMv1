@@ -116,15 +116,6 @@ PR_HOST void PR_retrieveIO(pr_tx_args_s *args)
 		last_size = sizeArray;
 	}
 
-	if (last_size != sizeArray) {
-		// TODO
-		hostNbAborts = (int*)realloc(hostNbAborts, sizeArray*d->PR_streamCount);
-		hostNbCommits = (int*)realloc(hostNbCommits, sizeArray*d->PR_streamCount);
-		last_size = sizeArray;
-	}
-
-	// TODO: this is only done in the end --> need to copy all streams!
-
 	void *devNbAborts = (int*)args->dev.nbAborts;
 	void *devNbCommits = (int*)args->dev.nbCommits;
 

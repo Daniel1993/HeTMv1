@@ -16,6 +16,7 @@ REDUCED_RS       ?= 0
 HETM_NB_DEVICES  ?= 2
 BMAP_ENC_1BIT    ?= 0
 USE_TSX_IMPL     ?= 0
+INST_CPU         ?= 1
 
 SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
 SYS_CPU_NB_CORES=$(shell cat /proc/cpuinfo | grep processor | wc -l)
@@ -32,6 +33,10 @@ DEFINES += \
 
 ifeq ($(BMAP_ENC_1BIT),1)
 DEFINES += -DBMAP_ENC_1BIT
+endif
+
+ifeq ($(INST_CPU),1)
+DEFINES += -DHETM_INSTRUMENT_CPU
 endif
 
 ifeq ($(DISABLE_RS),1)

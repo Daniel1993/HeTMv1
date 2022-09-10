@@ -165,28 +165,22 @@ void bank_part9_cpu_run(int id, thread_data_t *d)
 
 __device__ void bank_part9_gpu_run(int tid, PR_txCallDefArgs)
 {
-	// __shared__ int rndVoteOption[32];
-	// __shared__ int rndVoteOption2[32];
+	__shared__ int rndVoteOption[32];
+	__shared__ int rndVoteOption2[32];
 
 	int i = 0; //how many transactions one thread need to commit
 	// HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
 	int option;
 	int option2;
 
-	// if (threadIdx.x % 32 == 0) {
-	// 	rndVoteOption[threadIdx.x / 32] = PR_rand(INT_MAX);
-	// 	rndVoteOption2[threadIdx.x / 32] = PR_rand(INT_MAX);
-	// }
-	__syncthreads();
-	// option = rndVoteOption[threadIdx.x / 32];
-	// option2 = rndVoteOption2[threadIdx.x / 32];
-	if (threadIdx.x % 32 == 0)
-	{
-		option = PR_rand(INT_MAX);
-		option2 = PR_rand(INT_MAX);
+	if (threadIdx.x % 32 == 0) {
+		rndVoteOption[threadIdx.x / 32] = PR_rand(INT_MAX);
+		rndVoteOption2[threadIdx.x / 32] = PR_rand(INT_MAX);
 	}
-	option = __shfl_sync(0xffffffff, option, 0);
-	option2 = __shfl_sync(0xffffffff, option2, 0);
+	__syncthreads();
+	option = rndVoteOption[threadIdx.x / 32];
+	option2 = rndVoteOption2[threadIdx.x / 32];
+
 	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
 
 	for (i = 0; i < txsPerGPUThread; ++i) { // each thread need to commit x transactions
@@ -194,15 +188,19 @@ __device__ void bank_part9_gpu_run(int tid, PR_txCallDefArgs)
 		__syncthreads();
 		if (option % 100 < prec_read_intensive) {
 			if (option2 % 100000000 < (devParsedData.prec_write_txs * 1000000)) { // prec read-only
+				// printf("readIntensive_tx\n");
 				readIntensive_tx(PR_txCallArgs, i);
 			} else {
+				// printf("readOnly_tx\n");
 				readOnly_tx(PR_txCallArgs, i);
 			}
 		} else {
 			if (option2 % 100000000 < (devParsedData.prec_write_txs * 1000000)) {
 				// update_tx_simple(PR_txCallArgs, i);
+				// printf("update_tx2\n");
 				update_tx2(PR_txCallArgs, i);
 			} else {
+				// printf("readOnly_tx2\n");
 				readOnly_tx2(PR_txCallArgs, i);
 			}
 		}

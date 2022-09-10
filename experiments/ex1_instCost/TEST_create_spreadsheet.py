@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import sys
 import glob
 import csv
 import numpy as np
@@ -9,18 +10,19 @@ class DataSpreadSheet:
   def __init__(self, data_dir = ".", nb_samples = 5, workbook_name = "inst_data.xlsx"):
     self.data_dir = data_dir
     self.nb_samples = nb_samples
-    self.HTM_4MB_1THR_INST      = "HTM_4MB_1THR_INST.csv"
-    self.HTM_4MB_1THR_NO_INST   = "HTM_4MB_1THR_NO_INST.csv"
-    self.HTM_600MB_1THR_INST    = "HTM_600MB_1THR_INST.csv"
-    self.HTM_600MB_1THR_NO_INST = "HTM_600MB_1THR_NO_INST.csv"
-    self.data_files = [
-      self.HTM_4MB_1THR_INST,
-      self.HTM_4MB_1THR_NO_INST,
-      self.HTM_600MB_1THR_INST,
-      self.HTM_600MB_1THR_NO_INST
-    ]
+    # self.HTM_4MB_1THR_INST      = "HTM_4MB_1THR_INST.csv"
+    # self.HTM_4MB_1THR_NO_INST   = "HTM_4MB_1THR_NO_INST.csv"
+    # self.HTM_600MB_1THR_INST    = "HTM_600MB_1THR_INST.csv"
+    # self.HTM_600MB_1THR_NO_INST = "HTM_600MB_1THR_NO_INST.csv"
+    # self.data_files = [
+    #   self.HTM_4MB_1THR_INST,
+    #   self.HTM_4MB_1THR_NO_INST,
+    #   self.HTM_600MB_1THR_INST,
+    #   self.HTM_600MB_1THR_NO_INST
+    # ]
+    self.data_files = sys.argv[1:]
     self.workbook = Workbook(workbook_name)
-    self.worksheet_cmp = self.workbook.add_worksheet("cmp")
+    # self.worksheet_cmp = self.workbook.add_worksheet("cmp")
     self.worksheet_data = self.workbook.add_worksheet("data")
     self.readCsv()
 

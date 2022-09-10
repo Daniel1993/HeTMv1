@@ -51,13 +51,13 @@ void HeTM_gpu_thread()
 
     NVTX_PUSH_RANGE("Run TX Batch", NVTX_RUN_TX_BATCH);
     roundCountAfterBatch = *hetm_batchCount;
-    do {
+    while(!timeIsOver())
+    {
       runGPUBeforeKernel(threadId, (void*)HeTM_thread_data[0]);
       runGPUBatch();
       waitGPUBatchEnd();
       runGPUAfterKernel(threadId, (void*)HeTM_thread_data[0]);
     } 
-    while(!timeIsOver());
 
     // ------------- takes statistics
     extern int PR_enable_auto_stats;

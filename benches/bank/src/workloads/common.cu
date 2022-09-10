@@ -188,7 +188,9 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 #endif /* BANK_PART == 9 */
 		}
 		// printf("PR_read = %i\n", accountIdx);
+
 		count_amount += PR_read(accounts + accountIdx);
+		
 		// count_amount += accounts[accountIdx];
 	}
 
@@ -217,7 +219,9 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 		// 	printf("PR_write = %u\n", accountIdx);
 		// PR_read(accounts + accountIdx);
 		// accountIdx = 0;
+
 		PR_write(accounts + accountIdx, count_amount * input_buffer[id+txCount*tot_nb_threads]);
+
 		// accounts[accountIdx] = count_amount * input_buffer[id+txCount*tot_nb_threads];
 	}
 
